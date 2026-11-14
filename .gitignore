@@ -1,0 +1,11 @@
+node_modules
+dist
+frontend-dist
+backend/tmp
+backend/web/dist/*
+!backend/web/dist/index.html
+.env.dev
+
+# Browser test artifacts
+playwright-report/
+test-results/
