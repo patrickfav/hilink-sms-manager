@@ -4,6 +4,8 @@ import { detectOTP } from './ui'
 describe('detectOTP', () => {
   it('extracts a code near verification wording', () => {
     expect(detectOTP('Your verification code is 482913.')).toBe('482913')
+    expect(detectOTP('Ihr Sicherheitscode lautet 482913.')).toBe('482913')
+    expect(detectOTP('Ihr Verifizierungscode lautet 482913.')).toBe('482913')
     expect(detectOTP('Your code is 1234')).toBe('1234')
   })
 

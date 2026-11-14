@@ -12,7 +12,7 @@ cd backend && go mod download && cd ..
 pnpm dev
 ```
 
-`pnpm dev` creates a local `.env.dev` from `.env.dev.example` on first run, then starts the mock modem, Go backend with Air reload, and Vite together. Open `http://localhost:5173` and sign in with `operator` / `dev-password`. These defaults are for local development only. The frontend proxies `/api` to `127.0.0.1:8080`. Use `pnpm build` to generate frontend assets and compile `dist/hilink-sms`.
+`pnpm dev` creates a local `.env.dev` from `.env.dev.example` on first run, then starts the mock modem, Go backend with Air reload, and Vite together. Open `http://localhost:5173` and sign in with `admin` / `admin`. These defaults are for local development only. The frontend proxies `/api` to `127.0.0.1:8080`. Use `pnpm build` to generate frontend assets and compile `dist/hilink-sms`.
 
 The mock starts with an empty inbox. Inject a message with:
 
@@ -24,7 +24,7 @@ curl -X POST http://127.0.0.1:18080/__mock/messages \
 
 The SMS appears after the next backend poll. Delete it in the app as usual. The mock stores messages only in memory and binds to loopback by default; it implements only the API subset used by this app and does not establish compatibility with physical modem firmware.
 
-Commands: `pnpm test`, `pnpm test:e2e`, `pnpm lint`, and `pnpm typecheck`.
+Commands: `pnpm test`, `pnpm test:e2e`, `pnpm lint`, `pnpm lint:fix`, `pnpm fmt`, `pnpm fmt:check`, and `pnpm typecheck`.
 
 ## Configuration
 

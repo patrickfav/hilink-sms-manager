@@ -2,10 +2,6 @@
   "name": "hilink-sms-manager",
   "private": true,
   "type": "module",
-  "packageManager": "pnpm@12.5.0",
-  "engines": {
-    "node": ">=26.0.0"
-  },
   "scripts": {
     "dev": "sh scripts/dev.sh",
     "dev:mock": "cd backend && go run ./cmd/mock-hilink",
@@ -16,7 +12,10 @@
     "test": "pnpm test:go && vitest run",
     "test:go": "cd backend && go test ./...",
     "test:e2e": "playwright test",
-    "lint": "tsc --noEmit",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "fmt": "oxfmt frontend/src vite.config.ts playwright.config.ts tests package.json frontend/package.json tsconfig.json",
+    "fmt:check": "oxfmt --check frontend/src vite.config.ts playwright.config.ts tests package.json frontend/package.json tsconfig.json",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -31,11 +30,16 @@
     "@testing-library/preact": "^3.2.6",
     "@types/node": "^26.6.6",
     "concurrently": "^10.0.7",
-    "eslint": "^10.14.0",
     "jsdom": "^31.0.1",
+    "oxfmt": "^0.78.0",
+    "oxlint": "^1.93.0",
     "tailwindcss": "^4.3.5",
     "typescript": "^7.0.2",
     "vite": "^8.3.8",
     "vitest": "^5.1.0"
-  }
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  },
+  "packageManager": "pnpm@12.5.0"
 }

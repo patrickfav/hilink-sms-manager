@@ -1,1 +1,5 @@
-{"name":"@hilink/frontend","private":true,"type":"module"}
+{
+  "name": "@hilink/frontend",
+  "private": true,
+  "type": "module"
+}

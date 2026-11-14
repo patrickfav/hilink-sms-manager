@@ -11,13 +11,22 @@ const sms = {
 test('login, inspect an OTP, and delete its SMS', async ({ page, context }) => {
   let deleted = false
   await context.grantPermissions(['clipboard-read', 'clipboard-write'])
-  await page.route('**/api/auth/session', route => route.fulfill({ json: { authenticated: false } }))
-  await page.route('**/api/auth/login', route => route.fulfill({ json: { authenticated: true } }))
-  await page.route('**/api/auth/logout', route => route.fulfill({ json: { authenticated: false } }))
-  await page.route('**/api/sms', route => route.fulfill({
-    json: { messages: deleted ? [] : [sms], status: { connected: true, lastSync: sms.receivedAt, messageCount: deleted ? 0 : 1 } },
-  }))
-  await page.route('**/api/sms/42', route => {
+  await page.route('**/api/auth/session', (route) =>
+    route.fulfill({ json: { authenticated: false } }),
+  )
+  await page.route('**/api/auth/login', (route) => route.fulfill({ json: { authenticated: true } }))
+  await page.route('**/api/auth/logout', (route) =>
+    route.fulfill({ json: { authenticated: false } }),
+  )
+  await page.route('**/api/sms', (route) =>
+    route.fulfill({
+      json: {
+        messages: deleted ? [] : [sms],
+        status: { connected: true, lastSync: sms.receivedAt, messageCount: deleted ? 0 : 1 },
+      },
+    }),
+  )
+  await page.route('**/api/sms/42', (route) => {
     if (route.request().method() === 'DELETE') {
       deleted = true
       return route.fulfill({ status: 204, body: '' })
@@ -45,12 +54,18 @@ test('login, inspect an OTP, and delete its SMS', async ({ page, context }) => {
 
 test('inbox layout fits a narrow mobile viewport', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 })
-  await page.route('**/api/auth/session', route => route.fulfill({ json: { authenticated: true } }))
-  await page.route('**/api/sms', route => route.fulfill({
-    json: { messages: [], status: { connected: true, lastSync: null, messageCount: 0 } },
-  }))
+  await page.route('**/api/auth/session', (route) =>
+    route.fulfill({ json: { authenticated: true } }),
+  )
+  await page.route('**/api/sms', (route) =>
+    route.fulfill({
+      json: { messages: [], status: { connected: true, lastSync: null, messageCount: 0 } },
+    }),
+  )
   await page.goto('/')
   await expect(page.getByText('Your inbox is clear')).toBeVisible()
-  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth,
+  )
   expect(overflow).toBe(false)
 })
