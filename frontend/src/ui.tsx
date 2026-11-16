@@ -509,7 +509,6 @@ export function App() {
                             </span>
                             <button
                               type="button"
-                              type="button"
                               class="copy-code-link"
                               aria-label={`Copy code ${code}`}
                               onClick={(e) => {
