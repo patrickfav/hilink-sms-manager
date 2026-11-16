@@ -90,12 +90,13 @@ func (h *HTTP) accessLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
 		logged := &accessLogWriter{ResponseWriter: w}
+		h.logger.Info("http request", "method", r.Method, "path", r.URL.Path, "remote", clientIP(r), "request_bytes", r.ContentLength)
 		next.ServeHTTP(logged, r)
 		status := logged.status
 		if status == 0 {
 			status = http.StatusOK
 		}
-		h.logger.Info("http request", "method", r.Method, "path", r.URL.Path, "status", status, "bytes", logged.bytes, "duration_ms", time.Since(started).Seconds()*1000)
+		h.logger.Info("http response", "method", r.Method, "path", r.URL.Path, "status", status, "response_bytes", logged.bytes, "duration_ms", time.Since(started).Seconds()*1000)
 	})
 }
 func (h *HTTP) secureHeaders(next http.Handler) http.Handler {
