@@ -71,6 +71,24 @@ func (m *modem) routes() http.Handler {
 		w.Header().Set("__RequestVerificationToken", verificationToken)
 		_, _ = io.WriteString(w, `<response><State>0</State><Challenge>local-mock-challenge</Challenge></response>`)
 	})
+	mux.HandleFunc("POST /api/device/control", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/xml; charset=UTF-8")
+		w.Header().Set("__RequestVerificationToken", verificationToken)
+		_, _ = io.WriteString(w, `<response>OK</response>`)
+	})
+	mux.HandleFunc("GET /api/sms/sms-count", func(w http.ResponseWriter, r *http.Request) {
+		m.mu.RLock()
+		count := len(m.messages)
+		m.mu.RUnlock()
+		w.Header().Set("Content-Type", "application/xml; charset=UTF-8")
+		w.Header().Set("__RequestVerificationToken", verificationToken)
+		_, _ = fmt.Fprintf(w, `<response><LocalInbox>%d</LocalInbox><LocalUnread>0</LocalUnread></response>`, count)
+	})
+	mux.HandleFunc("GET /api/monitoring/check-notifications", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/xml; charset=UTF-8")
+		w.Header().Set("__RequestVerificationToken", verificationToken)
+		_, _ = io.WriteString(w, `<response><SmsStorageFull>0</SmsStorageFull></response>`)
+	})
 	mux.HandleFunc("POST /api/user/login", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/xml; charset=UTF-8")
 		w.Header().Set("__RequestVerificationToken", verificationToken)

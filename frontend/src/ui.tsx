@@ -8,6 +8,7 @@ import {
   LogOut,
   MessageSquare,
   Moon,
+  Phone,
   Radio,
   RefreshCw,
   Search,
@@ -36,6 +37,9 @@ function timeLabel(raw: string) {
     timeStyle: 'short',
     hourCycle: 'h23',
   }).format(date)
+}
+function avatarLetter(name: string) {
+  return name.trim().slice(0, 1).toUpperCase()
 }
 function linkifyText(text: string): ComponentChildren {
   const tokenPattern =
@@ -178,6 +182,9 @@ export function App() {
   const [loading, setLoading] = useState(false)
   const [confirm, setConfirm] = useState(false)
   const [signOutConfirm, setSignOutConfirm] = useState(false)
+  const [deviceInfoOpen, setDeviceInfoOpen] = useState(false)
+  const [rebootConfirm, setRebootConfirm] = useState(false)
+  const [rebooting, setRebooting] = useState(false)
   const [page, setPage] = useState(0)
   const [refreshCount, setRefreshCount] = useState(0)
   const [refreshing, setRefreshing] = useState(false)
@@ -193,9 +200,7 @@ export function App() {
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
   const visibleMessages = filtered.slice(page * pageSize, (page + 1) * pageSize)
   const deviceLabel =
-    [status?.deviceName, status?.webUIVersion && `Web UI ${status.webUIVersion}`]
-      .filter(Boolean)
-      .join(' · ') || 'HiLink device'
+    [status?.deviceName, status?.hardwareVersion].filter(Boolean).join(' · ') || 'HiLink device'
   useEffect(() => {
     document.title = unreadCount > 0 ? `HiLink SMS (${unreadCount})` : 'HiLink SMS'
   }, [unreadCount])
@@ -214,7 +219,7 @@ export function App() {
   useEffect(() => {
     if (!authenticated) return
     let active = false
-    let timer: number
+    let timer: number | undefined
     const refresh = async () => {
       if (document.visibilityState !== 'visible' || active) return
       active = true
@@ -232,14 +237,26 @@ export function App() {
         setRefreshCycle((cycle) => cycle + 1)
       }
     }
-    void refresh()
-    timer = window.setInterval(() => void refresh(), refreshInterval)
+    const stopPolling = () => {
+      if (timer !== undefined) {
+        window.clearInterval(timer)
+        timer = undefined
+      }
+    }
+    const startPolling = () => {
+      stopPolling()
+      if (document.visibilityState !== 'visible') return
+      void refresh()
+      timer = window.setInterval(() => void refresh(), refreshInterval)
+    }
     const visible = () => {
-      if (document.visibilityState === 'visible') void refresh()
+      if (document.visibilityState === 'visible') startPolling()
+      else stopPolling()
     }
     document.addEventListener('visibilitychange', visible)
+    startPolling()
     return () => {
-      clearInterval(timer)
+      stopPolling()
       document.removeEventListener('visibilitychange', visible)
     }
   }, [authenticated, refreshCount])
@@ -289,6 +306,24 @@ export function App() {
     setItems([])
     setSelected(null)
   }
+  async function reboot() {
+    setRebooting(true)
+    try {
+      await api.reboot()
+      setRebootConfirm(false)
+      setDeviceInfoOpen(false)
+      setStatus((currentStatus) =>
+        currentStatus
+          ? { ...currentStatus, connected: false, error: 'Modem is rebooting.' }
+          : currentStatus,
+      )
+      notice('Modem rebooting…')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unable to reboot modem')
+    } finally {
+      setRebooting(false)
+    }
+  }
   if (authenticated === null)
     return (
       <div class="splash">
@@ -310,19 +345,30 @@ export function App() {
             </span>
           </div>
           <div class="top-actions">
-            <div class="connection">
-              <span class={`dot ${status?.connected ? 'green' : 'gray'}`} />
-              <span>{status?.connected ? 'Modem connected' : 'Connecting to modem'}</span>
-            </div>
+            {status?.connected ? (
+              <button
+                class="connection connection-button"
+                aria-label="Show modem information"
+                onClick={() => setDeviceInfoOpen(true)}
+              >
+                <span class="dot green" />
+                <span>Modem connected</span>
+              </button>
+            ) : (
+              <div class="connection">
+                <span class={`dot ${status?.connected ? 'green' : 'gray'}`} />
+                <span>Connecting to modem</span>
+              </div>
+            )}
             <span class="top-divider" />
             <ThemeToggle />
             <button
-              class="avatar"
+              class="icon-button"
               aria-label="Sign out"
               title="Sign out"
               onClick={() => setSignOutConfirm(true)}
             >
-              H
+              <LogOut size={18} />
             </button>
           </div>
         </header>
@@ -339,7 +385,7 @@ export function App() {
             </h1>
             <div class="heading-subline">
               <p class="muted">Messages received on your modem appear here.</p>
-              {status?.lastSync && !status.error && !error && (
+              {status?.lastSync && !status.error && !error && !status.storageFull && (
                 <span class="sync-inline">
                   <span class="dot green" /> Last synced {timeLabel(status.lastSync)}
                 </span>
@@ -367,13 +413,19 @@ export function App() {
             </button>
           </div>
         </div>
-        {(error || status?.error || !status?.lastSync) && (
+        {(error || status?.error || status?.storageFull || !status?.lastSync) && (
           <div
-            class={`sync-note ${error || status?.error ? 'sync-error' : ''}`}
-            role={error || status?.error ? 'alert' : undefined}
+            class={`sync-note ${error || status?.error || status?.storageFull ? 'sync-error' : ''}`}
+            role={error || status?.error || status?.storageFull ? 'alert' : undefined}
           >
             <span class={`dot ${status?.connected ? 'green' : 'amber'}`} />
-            <span>{error || status?.error || 'Waiting for first sync'}</span>
+            <span>
+              {error ||
+                status?.error ||
+                (status?.storageFull
+                  ? 'SMS storage is full; delete messages on the modem to receive new SMS.'
+                  : 'Waiting for first sync')}
+            </span>
           </div>
         )}
         <section class={`inbox-panel ${current ? 'has-detail' : ''}`}>
@@ -431,10 +483,12 @@ export function App() {
                         }
                       }}
                     >
-                      <span class="sender-avatar">{(m.sender || '?').slice(-1)}</span>
+                      <span class="sender-avatar">
+                        {m.senderName ? avatarLetter(m.senderName) : <Phone size={16} />}
+                      </span>
                       <span class="row-content">
                         <span class="row-head">
-                          <strong>{m.sender || 'Unknown sender'}</strong>
+                          <strong>{m.senderName || m.sender || 'Unknown sender'}</strong>
                           <time>{timeLabel(m.receivedAt)}</time>
                         </span>
                         <span class="preview">{linkifyText(m.text)}</span>
@@ -506,7 +560,8 @@ export function App() {
                   </button>
                 </div>
                 <div class="detail-body">
-                  <h2>{current.sender || 'Unknown sender'}</h2>
+                  <h2>{current.senderName || current.sender || 'Unknown sender'}</h2>
+                  {current.senderName && <p class="sender-number">{current.sender}</p>}
                   <p class="detail-date">Received {timeLabel(current.receivedAt)}</p>
                   <div class="message-text">
                     <span>{linkifyText(current.text)}</span>
@@ -602,6 +657,85 @@ export function App() {
               </button>
               <button class="destructive" onClick={() => void signOut()}>
                 Sign out
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      {deviceInfoOpen && status?.connected && (
+        <div
+          class="modal-backdrop"
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setDeviceInfoOpen(false)
+          }}
+        >
+          <section
+            class="dialog device-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="device-info-title"
+          >
+            <div class="dialog-icon">
+              <Radio size={19} />
+            </div>
+            <h2 id="device-info-title">Modem information</h2>
+            <dl class="device-info-list">
+              <dt>Device name</dt>
+              <dd>{status.deviceName || 'Unknown'}</dd>
+              <dt>IMEI</dt>
+              <dd>{status.imei || 'Unknown'}</dd>
+              <dt>IMSI</dt>
+              <dd>{status.imsi || 'Unknown'}</dd>
+              <dt>My number</dt>
+              <dd>{status.phoneNumber || 'Unknown'}</dd>
+              <dt>Hardware version</dt>
+              <dd>{status.hardwareVersion || 'Unknown'}</dd>
+              <dt>Software version</dt>
+              <dd>{status.softwareVersion || 'Unknown'}</dd>
+              <dt>Web UI version</dt>
+              <dd>{status.webUIVersion || 'Unknown'}</dd>
+              <dt>LAN MAC address</dt>
+              <dd>{status.lanMacAddress || 'Unknown'}</dd>
+              <dt>WAN IP address</dt>
+              <dd>{status.wanIpAddress || 'Unknown'}</dd>
+            </dl>
+            <div class="dialog-actions">
+              <button class="secondary" onClick={() => setDeviceInfoOpen(false)}>
+                Close
+              </button>
+              <button class="destructive" onClick={() => setRebootConfirm(true)}>
+                Reboot
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      {rebootConfirm && (
+        <div
+          class="modal-backdrop"
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setRebootConfirm(false)
+          }}
+        >
+          <section
+            class="dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="reboot-title"
+          >
+            <div class="dialog-icon">
+              <RefreshCw size={19} />
+            </div>
+            <h2 id="reboot-title">Reboot modem?</h2>
+            <p>The modem will disconnect briefly while it restarts.</p>
+            <div class="dialog-actions">
+              <button class="secondary" onClick={() => setRebootConfirm(false)}>
+                Cancel
+              </button>
+              <button class="destructive" disabled={rebooting} onClick={() => void reboot()}>
+                {rebooting ? 'Rebooting…' : 'Reboot'}
               </button>
             </div>
           </section>

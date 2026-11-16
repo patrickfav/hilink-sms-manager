@@ -110,8 +110,13 @@ type deviceInformation struct {
 	XMLName         xml.Name `xml:"response"`
 	Msisdn          string   `xml:"Msisdn"`
 	DeviceName      string   `xml:"DeviceName"`
+	Imei            string   `xml:"Imei"`
+	Imsi            string   `xml:"Imsi"`
+	HardwareVersion string   `xml:"HardwareVersion"`
 	SoftwareVersion string   `xml:"SoftwareVersion"`
 	WebUIVersion    string   `xml:"WebUIVersion"`
+	MacAddress1     string   `xml:"MacAddress1"`
+	WanIPAddress    string   `xml:"WanIPAddress"`
 }
 
 func (c *Client) setSessionCookie(sesInfo string) {
@@ -422,12 +427,79 @@ func (c *Client) DeviceInfo(ctx context.Context) (sms.DeviceInfo, error) {
 	return sms.DeviceInfo{
 		PhoneNumber:     strings.TrimSpace(info.Msisdn),
 		DeviceName:      strings.TrimSpace(info.DeviceName),
+		IMEI:            strings.TrimSpace(info.Imei),
+		IMSI:            strings.TrimSpace(info.Imsi),
+		HardwareVersion: strings.TrimSpace(info.HardwareVersion),
 		SoftwareVersion: strings.TrimSpace(info.SoftwareVersion),
 		WebUIVersion:    strings.TrimSpace(info.WebUIVersion),
+		LANMACAddress:   strings.TrimSpace(info.MacAddress1),
+		WANIPAddress:    strings.TrimSpace(info.WanIPAddress),
 	}, nil
 }
 
 func (c *Client) PhoneNumber(ctx context.Context) (string, error) {
 	info, err := c.DeviceInfo(ctx)
 	return info.PhoneNumber, err
+}
+
+func (c *Client) Reboot(ctx context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.ensure(ctx); err != nil {
+		return err
+	}
+	body := []byte("<?xml version=\"1.0\" encoding=\"UTF-8\"?><request><Control>1</Control></request>")
+	responseBody, _, code, err := c.request(ctx, http.MethodPost, "/api/device/control", body, c.token)
+	if err != nil {
+		return err
+	}
+	if code != http.StatusOK {
+		return fmt.Errorf("modem reboot returned HTTP %d", code)
+	}
+	if code := apiErrorCode(responseBody); code != "" {
+		return fmt.Errorf("modem reboot returned error %s", code)
+	}
+	c.loggedIn = false
+	return nil
+}
+
+func (c *Client) StorageStatus(ctx context.Context) (sms.StorageStatus, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := c.ensure(ctx); err != nil {
+		return sms.StorageStatus{}, err
+	}
+	countBody, _, code, err := c.request(ctx, http.MethodGet, "/api/sms/sms-count", nil, c.token)
+	if err != nil {
+		return sms.StorageStatus{}, err
+	}
+	if code != http.StatusOK {
+		return sms.StorageStatus{}, fmt.Errorf("modem SMS count returned HTTP %d", code)
+	}
+	if code := apiErrorCode(countBody); code != "" {
+		return sms.StorageStatus{}, fmt.Errorf("modem SMS count returned error %s", code)
+	}
+	var counts struct {
+		LocalInbox int `xml:"LocalInbox"`
+	}
+	if err := xml.Unmarshal(countBody, &counts); err != nil {
+		return sms.StorageStatus{}, fmt.Errorf("invalid modem SMS count response: %w", err)
+	}
+	notificationBody, _, code, err := c.request(ctx, http.MethodGet, "/api/monitoring/check-notifications", nil, c.token)
+	if err != nil {
+		return sms.StorageStatus{}, err
+	}
+	if code != http.StatusOK {
+		return sms.StorageStatus{}, fmt.Errorf("modem notification check returned HTTP %d", code)
+	}
+	if code := apiErrorCode(notificationBody); code != "" {
+		return sms.StorageStatus{}, fmt.Errorf("modem notification check returned error %s", code)
+	}
+	var notifications struct {
+		SmsStorageFull int `xml:"SmsStorageFull"`
+	}
+	if err := xml.Unmarshal(notificationBody, &notifications); err != nil {
+		return sms.StorageStatus{}, fmt.Errorf("invalid modem notification response: %w", err)
+	}
+	return sms.StorageStatus{LocalInbox: counts.LocalInbox, Full: notifications.SmsStorageFull == 1}, nil
 }

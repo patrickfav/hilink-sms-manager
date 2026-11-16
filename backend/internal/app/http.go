@@ -28,6 +28,9 @@ type deleter interface {
 type reader interface {
 	MarkRead(context.Context, string) error
 }
+type rebooter interface {
+	Reboot(context.Context) error
+}
 type HTTP struct {
 	cfg      config.Config
 	store    *sms.Store
@@ -57,6 +60,7 @@ func NewHTTP(c config.Config, s *sms.Store, m deleter, static fs.FS, l *slog.Log
 	mux.HandleFunc("/api/auth/session", h.session)
 	mux.HandleFunc("/api/sms", h.protect(h.messages))
 	mux.HandleFunc("/api/sms/", h.protect(h.message))
+	mux.HandleFunc("/api/device/reboot", h.protect(h.reboot))
 	mux.HandleFunc("/api/status", h.protect(h.status))
 	mux.Handle("/", http.FileServer(http.FS(static)))
 	return h.secureHeaders(h.accessLog(mux))
@@ -243,7 +247,36 @@ func (h *HTTP) messages(w http.ResponseWriter, r *http.Request) {
 		method(w, http.MethodGet)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"messages": h.store.List(), "status": h.store.Status()})
+	messages := h.store.List()
+	for i := range messages {
+		messages[i] = h.withContactName(messages[i])
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"messages": messages, "status": h.store.Status()})
+}
+func (h *HTTP) withContactName(message sms.Message) sms.Message {
+	if name, ok := h.cfg.AddressBook[message.Sender]; ok {
+		message.SenderName = name
+		return message
+	}
+	normalized := normalizePhone(message.Sender)
+	if normalized != "" {
+		for number, name := range h.cfg.AddressBook {
+			if normalizePhone(number) == normalized {
+				message.SenderName = name
+				break
+			}
+		}
+	}
+	return message
+}
+func normalizePhone(value string) string {
+	var normalized strings.Builder
+	for _, r := range value {
+		if (r >= '0' && r <= '9') || r == '+' {
+			normalized.WriteRune(r)
+		}
+	}
+	return normalized.String()
 }
 func (h *HTTP) message(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/sms/")
@@ -302,7 +335,7 @@ func (h *HTTP) message(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	writeJSON(w, http.StatusOK, m)
+	writeJSON(w, http.StatusOK, h.withContactName(m))
 }
 func (h *HTTP) status(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -310,6 +343,23 @@ func (h *HTTP) status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, h.store.Status())
+}
+func (h *HTTP) reboot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		method(w, http.MethodPost)
+		return
+	}
+	modem, ok := h.modem.(rebooter)
+	if !ok {
+		h.jsonError(w, http.StatusNotImplemented, "The modem does not support reboot.")
+		return
+	}
+	if err := modem.Reboot(r.Context()); err != nil {
+		h.logger.Warn("modem reboot failed", "error", err)
+		h.jsonError(w, http.StatusBadGateway, "The modem could not be rebooted.")
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
 }
 func (h *HTTP) valid(r *http.Request) bool {
 	c, e := r.Cookie("hilink_session")

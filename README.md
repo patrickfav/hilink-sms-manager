@@ -35,9 +35,9 @@ All application configuration is through environment variables:
 | `HILINK_URL` | no | `http://192.168.8.1` |
 | `HILINK_USERNAME` | yes | Modem administrator user |
 | `HILINK_PASSWORD` | yes | Modem administrator password |
+| `ADDRESS_BOOK` | no | `number:name` pairs separated by `|`, for example `+436991234456:Patrick Favre|+436992234456:Something else` |
 | `AUTH_USERNAME` | yes | Web login user |
 | `AUTH_PASSWORD_HASH` | yes | bcrypt password hash |
-| `SESSION_SECRET` | yes | Random secret of at least 32 characters |
 | `POLL_INTERVAL` | no | `15s` |
 | `SESSION_TTL` | no | `12h` |
 | `SLACK_ENABLED` | no | `false` |
@@ -49,10 +49,9 @@ Create credentials without putting the cleartext password in shell history:
 
 ```sh
 htpasswd -bnBC 12 '' 'choose-a-password' | cut -d: -f2
-openssl rand -base64 48
 ```
 
-Use the first output as `AUTH_PASSWORD_HASH` and the second as `SESSION_SECRET`. Keep secrets in your deployment secret manager. Login cookies are signed, HttpOnly, SameSite Strict, and use the Secure attribute for direct TLS or HTTPS asserted by a configured trusted proxy.
+The application generates a cryptographically random session-signing secret in memory at startup. Sessions are invalidated whenever the server restarts. Login cookies are signed, HttpOnly, SameSite Strict, and use the Secure attribute for direct TLS or HTTPS asserted by a configured trusted proxy.
 
 ## Docker deployment
 

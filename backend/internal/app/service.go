@@ -20,6 +20,9 @@ type modem interface {
 type deviceInfoProvider interface {
 	DeviceInfo(context.Context) (sms.DeviceInfo, error)
 }
+type storageStatusProvider interface {
+	StorageStatus(context.Context) (sms.StorageStatus, error)
+}
 
 type Forwarder struct {
 	enabled bool
@@ -112,6 +115,13 @@ func (s *Service) poll(ctx context.Context, initial bool) {
 			} else {
 				s.logger.Debug("modem device information unavailable", "error", infoErr)
 			}
+		}
+	}
+	if provider, ok := s.modem.(storageStatusProvider); ok {
+		if storage, storageErr := provider.StorageStatus(ctx); storageErr == nil {
+			s.store.SetStorageStatus(storage)
+		} else {
+			s.logger.Debug("modem SMS storage status unavailable", "error", storageErr)
 		}
 	}
 	s.mu.Lock()

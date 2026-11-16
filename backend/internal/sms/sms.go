@@ -13,6 +13,7 @@ type Message struct {
 	ID         string    `json:"id"`
 	Index      int       `json:"index,omitempty"`
 	Sender     string    `json:"sender"`
+	SenderName string    `json:"senderName,omitempty"`
 	Text       string    `json:"text"`
 	ReceivedAt time.Time `json:"receivedAt"`
 	Read       bool      `json:"read"`
@@ -21,8 +22,18 @@ type Message struct {
 type DeviceInfo struct {
 	PhoneNumber     string
 	DeviceName      string
+	IMEI            string
+	IMSI            string
+	HardwareVersion string
 	SoftwareVersion string
 	WebUIVersion    string
+	LANMACAddress   string
+	WANIPAddress    string
+}
+
+type StorageStatus struct {
+	LocalInbox int
+	Full       bool
 }
 
 // Identity deliberately excludes mutable fields such as read status.
@@ -38,6 +49,7 @@ type Store struct {
 	lastError string
 	connected bool
 	device    DeviceInfo
+	storage   StorageStatus
 }
 
 func NewStore() *Store { return &Store{} }
@@ -105,6 +117,12 @@ func (s *Store) SetDeviceInfo(info DeviceInfo) {
 	s.mu.Unlock()
 }
 
+func (s *Store) SetStorageStatus(storage StorageStatus) {
+	s.mu.Lock()
+	s.storage = storage
+	s.mu.Unlock()
+}
+
 type Status struct {
 	Connected       bool       `json:"connected"`
 	LastSync        *time.Time `json:"lastSync"`
@@ -112,8 +130,14 @@ type Status struct {
 	MessageCount    int        `json:"messageCount"`
 	PhoneNumber     string     `json:"phoneNumber,omitempty"`
 	DeviceName      string     `json:"deviceName,omitempty"`
+	IMEI            string     `json:"imei,omitempty"`
+	IMSI            string     `json:"imsi,omitempty"`
+	HardwareVersion string     `json:"hardwareVersion,omitempty"`
 	SoftwareVersion string     `json:"softwareVersion,omitempty"`
 	WebUIVersion    string     `json:"webUIVersion,omitempty"`
+	LANMACAddress   string     `json:"lanMacAddress,omitempty"`
+	WANIPAddress    string     `json:"wanIpAddress,omitempty"`
+	StorageFull     bool       `json:"storageFull,omitempty"`
 }
 
 func (s *Store) Status() Status {
@@ -127,7 +151,10 @@ func (s *Store) Status() Status {
 	return Status{
 		Connected: s.connected, LastSync: synced, Error: s.lastError,
 		MessageCount: len(s.messages), PhoneNumber: s.device.PhoneNumber,
-		DeviceName: s.device.DeviceName, SoftwareVersion: s.device.SoftwareVersion,
-		WebUIVersion: s.device.WebUIVersion,
+		DeviceName: s.device.DeviceName, IMEI: s.device.IMEI, IMSI: s.device.IMSI,
+		HardwareVersion: s.device.HardwareVersion, SoftwareVersion: s.device.SoftwareVersion,
+		WebUIVersion: s.device.WebUIVersion, LANMACAddress: s.device.LANMACAddress,
+		WANIPAddress: s.device.WANIPAddress,
+		StorageFull:  s.storage.Full,
 	}
 }

@@ -49,7 +49,13 @@ func TestListPaginatesUnicodeAndDeleteUsesModemIndex(t *testing.T) {
 			w.Header().Set("__RequestVerificationToken", "token-1")
 			io.WriteString(w, `<response>OK</response>`)
 		case "/api/device/information":
-			io.WriteString(w, `<response><Msisdn>+43123456789</Msisdn><DeviceName>E8372</DeviceName><SoftwareVersion>21.318.01.00.00</SoftwareVersion><WebUIVersion>17.100.19.00.1217</WebUIVersion></response>`)
+			io.WriteString(w, `<response><Msisdn>+43123456789</Msisdn><DeviceName>E8372</DeviceName><Imei>866649041388395</Imei><Imsi>232122004559769</Imsi><HardwareVersion>CL1E8372HM</HardwareVersion><SoftwareVersion>21.318.01.00.00</SoftwareVersion><WebUIVersion>17.100.19.00.1217</WebUIVersion><MacAddress1>24:31:54:42:8C:A7</MacAddress1><WanIPAddress>192.0.2.10</WanIPAddress></response>`)
+		case "/api/device/control":
+			io.WriteString(w, `<response>OK</response>`)
+		case "/api/sms/sms-count":
+			io.WriteString(w, `<response><LocalInbox>41</LocalInbox><LocalUnread>1</LocalUnread></response>`)
+		case "/api/monitoring/check-notifications":
+			io.WriteString(w, `<response><SmsStorageFull>1</SmsStorageFull></response>`)
 		case "/api/sms/sms-list":
 			body, _ := io.ReadAll(r.Body)
 			if strings.Contains(string(body), "<PageIndex>1</PageIndex>") {
@@ -107,7 +113,14 @@ func TestListPaginatesUnicodeAndDeleteUsesModemIndex(t *testing.T) {
 		t.Fatalf("PhoneNumber() = %q, %v", phone, err)
 	}
 	info, err := client.DeviceInfo(context.Background())
-	if err != nil || info.DeviceName != "E8372" || info.WebUIVersion != "17.100.19.00.1217" {
+	if err != nil || info.DeviceName != "E8372" || info.IMEI != "866649041388395" || info.LANMACAddress != "24:31:54:42:8C:A7" || info.WebUIVersion != "17.100.19.00.1217" {
 		t.Fatalf("DeviceInfo() = %#v, %v", info, err)
+	}
+	if err := client.Reboot(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	storage, err := client.StorageStatus(context.Background())
+	if err != nil || storage.LocalInbox != 41 || !storage.Full {
+		t.Fatalf("StorageStatus() = %#v, %v", storage, err)
 	}
 }

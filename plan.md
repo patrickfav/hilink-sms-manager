@@ -450,7 +450,6 @@ No configuration files, database, or runtime settings editor.
 | `HILINK_PASSWORD` | Modem administrator password |
 | `AUTH_USERNAME` | Web application username |
 | `AUTH_PASSWORD_HASH` | Web application password hash |
-| `SESSION_SECRET` | Session signing/authentication secret |
 | `POLL_INTERVAL` | Backend polling interval |
 | `SLACK_ENABLED` | Enable/disable Slack forwarding |
 | `SLACK_WEBHOOK_URL` | Slack incoming webhook |
