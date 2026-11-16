@@ -94,6 +94,7 @@ function ThemeToggle() {
     theme === 'dark' || (theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
   return (
     <button
+      type="button"
       class="icon-button"
       aria-label={`Theme: ${theme}`}
       title={`Theme: ${theme}`}
@@ -103,7 +104,7 @@ function ThemeToggle() {
     </button>
   )
 }
-function Login({ onLogin }: { onLogin: () => void }) {
+function Login() {
   const [username, setUser] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -114,7 +115,9 @@ function Login({ onLogin }: { onLogin: () => void }) {
     setError('')
     try {
       await api.login(username, password)
-      onLogin()
+      // Start a fresh document so password managers stop tracking the login form
+      // while the user interacts with the authenticated inbox.
+      window.location.reload()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to sign in.')
     } finally {
@@ -130,13 +133,14 @@ function Login({ onLogin }: { onLogin: () => void }) {
         <p class="eyebrow">PRIVATE INBOX</p>
         <h1>Welcome back</h1>
         <p class="muted">Sign in to view messages from your HiLink modem.</p>
-        <form onSubmit={submit} data-1p-ignore="true" data-op-ignore="true">
+        <form onSubmit={submit}>
           <label>
             Username
             <input
+              id="username"
+              name="username"
+              type="text"
               autoComplete="username"
-              data-1p-ignore="true"
-              data-op-ignore="true"
               value={username}
               onInput={(e) => setUser((e.target as HTMLInputElement).value)}
               required
@@ -145,10 +149,10 @@ function Login({ onLogin }: { onLogin: () => void }) {
           <label>
             Password
             <input
+              id="password"
+              name="password"
               type="password"
               autoComplete="current-password"
-              data-1p-ignore="true"
-              data-op-ignore="true"
               value={password}
               onInput={(e) => setPassword((e.target as HTMLInputElement).value)}
               required
@@ -159,14 +163,11 @@ function Login({ onLogin }: { onLogin: () => void }) {
               {error}
             </div>
           )}
-          <button class="primary full" disabled={busy}>
+          <button type="submit" class="primary full" disabled={busy}>
             {busy ? 'Signing in…' : 'Sign in'}
             <ChevronLeft class="arrow" size={16} />
           </button>
         </form>
-        <div class="login-foot">
-          <span class="dot green" /> Private connection
-        </div>
       </section>
     </main>
   )
@@ -330,7 +331,7 @@ export function App() {
         <span class="spinner" />
       </div>
     )
-  if (!authenticated) return <Login onLogin={() => setAuth(true)} />
+  if (!authenticated) return <Login />
   return (
     <div class="app-shell">
       <main class="workspace">
@@ -347,6 +348,7 @@ export function App() {
           <div class="top-actions">
             {status?.connected ? (
               <button
+                type="button"
                 class="connection connection-button"
                 aria-label="Show modem information"
                 onClick={() => setDeviceInfoOpen(true)}
@@ -363,6 +365,7 @@ export function App() {
             <span class="top-divider" />
             <ThemeToggle />
             <button
+              type="button"
               class="icon-button"
               aria-label="Sign out"
               title="Sign out"
@@ -394,6 +397,7 @@ export function App() {
           </div>
           <div class="refresh-control">
             <button
+              type="button"
               class="secondary refresh"
               disabled={refreshing}
               onClick={() => {
@@ -434,6 +438,11 @@ export function App() {
               <div class="search">
                 <Search size={16} />
                 <input
+                  type="search"
+                  name="message-search"
+                  autoComplete="off"
+                  data-1p-ignore="true"
+                  data-op-ignore="true"
                   aria-label="Search messages"
                   placeholder="Search messages…"
                   value={query}
@@ -441,6 +450,7 @@ export function App() {
                 />
                 {query && (
                   <button
+                    type="button"
                     class="clear-search"
                     aria-label="Clear search"
                     onClick={() => setQuery('')}
@@ -499,6 +509,7 @@ export function App() {
                             </span>
                             <button
                               type="button"
+                              type="button"
                               class="copy-code-link"
                               aria-label={`Copy code ${code}`}
                               onClick={(e) => {
@@ -520,6 +531,7 @@ export function App() {
             {filtered.length > pageSize && (
               <nav class="pagination" aria-label="Message pages">
                 <button
+                  type="button"
                   class="secondary pagination-button"
                   disabled={page === 0}
                   onClick={() => setPage((currentPage) => Math.max(0, currentPage - 1))}
@@ -530,6 +542,7 @@ export function App() {
                   Page {page + 1} of {pageCount}
                 </span>
                 <button
+                  type="button"
                   class="secondary pagination-button"
                   disabled={page === pageCount - 1}
                   onClick={() => setPage((currentPage) => Math.min(pageCount - 1, currentPage + 1))}
@@ -544,6 +557,7 @@ export function App() {
               <>
                 <div class="detail-header">
                   <button
+                    type="button"
                     class="icon-button back"
                     aria-label="Back to inbox"
                     onClick={() => setSelected(null)}
@@ -552,6 +566,7 @@ export function App() {
                   </button>
                   <span class="detail-label">MESSAGE DETAILS</span>
                   <button
+                    type="button"
                     class="icon-button danger-icon"
                     aria-label="Delete message"
                     onClick={() => setConfirm(true)}
@@ -574,6 +589,7 @@ export function App() {
                         <strong>{detectOTP(current.text)}</strong>
                       </div>
                       <button
+                        type="button"
                         class="secondary copy-button"
                         onClick={() => void copy(detectOTP(current.text)!)}
                       >
@@ -622,10 +638,10 @@ export function App() {
             <h2 id="delete-title">Delete this message?</h2>
             <p>This will permanently delete the SMS from your modem.</p>
             <div class="dialog-actions">
-              <button class="secondary" onClick={() => setConfirm(false)}>
+              <button type="button" class="secondary" onClick={() => setConfirm(false)}>
                 Cancel
               </button>
-              <button class="destructive" disabled={loading} onClick={() => void remove()}>
+              <button type="button" class="destructive" disabled={loading} onClick={() => void remove()}>
                 {loading ? 'Deleting…' : 'Delete message'}
               </button>
             </div>
@@ -652,10 +668,10 @@ export function App() {
             <h2 id="signout-title">Are you sure you want to sign out?</h2>
             <p>You can sign back in whenever you want.</p>
             <div class="dialog-actions">
-              <button class="secondary" onClick={() => setSignOutConfirm(false)}>
+              <button type="button" class="secondary" onClick={() => setSignOutConfirm(false)}>
                 Cancel
               </button>
-              <button class="destructive" onClick={() => void signOut()}>
+              <button type="button" class="destructive" onClick={() => void signOut()}>
                 Sign out
               </button>
             </div>
@@ -701,10 +717,10 @@ export function App() {
               <dd>{status.wanIpAddress || 'Unknown'}</dd>
             </dl>
             <div class="dialog-actions">
-              <button class="secondary" onClick={() => setDeviceInfoOpen(false)}>
+              <button type="button" class="secondary" onClick={() => setDeviceInfoOpen(false)}>
                 Close
               </button>
-              <button class="destructive" onClick={() => setRebootConfirm(true)}>
+              <button type="button" class="destructive" onClick={() => setRebootConfirm(true)}>
                 Reboot
               </button>
             </div>
@@ -731,10 +747,10 @@ export function App() {
             <h2 id="reboot-title">Reboot modem?</h2>
             <p>The modem will disconnect briefly while it restarts.</p>
             <div class="dialog-actions">
-              <button class="secondary" onClick={() => setRebootConfirm(false)}>
+              <button type="button" class="secondary" onClick={() => setRebootConfirm(false)}>
                 Cancel
               </button>
-              <button class="destructive" disabled={rebooting} onClick={() => void reboot()}>
+              <button type="button" class="destructive" disabled={rebooting} onClick={() => void reboot()}>
                 {rebooting ? 'Rebooting…' : 'Reboot'}
               </button>
             </div>
