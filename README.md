@@ -38,7 +38,7 @@ All application configuration is through environment variables:
 | `ADDRESS_BOOK` | no | `number:name` pairs separated by `|`, for example `+436991234456:Patrick Favre|+436992234456:Something else` |
 | `AUTH_USERNAME` | yes | Web login user |
 | `AUTH_PASSWORD_HASH` | yes | bcrypt password hash |
-| `POLL_INTERVAL` | no | `15s` |
+| `POLL_INTERVAL` | no | `15s`; backend modem polling and Slack detection run every `2 × POLL_INTERVAL` (30s by default), after an immediate startup sync |
 | `SESSION_TTL` | no | `12h` |
 | `SLACK_ENABLED` | no | `false` |
 | `SLACK_WEBHOOK_URL` | when enabled | HTTPS Slack incoming webhook |
