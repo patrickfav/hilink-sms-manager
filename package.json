@@ -9,6 +9,7 @@
     "dev:frontend": "vite --host 127.0.0.1",
     "build:frontend": "vite build && mkdir -p backend/web/dist && cp -R frontend-dist/. backend/web/dist/",
     "build": "pnpm build:frontend && mkdir -p dist && cd backend && go build -trimpath -ldflags='-s -w' -o ../dist/hilink-sms ./cmd/server",
+    "docker:build": "docker build -t hilink-sms-manager:local .",
     "test": "pnpm build:frontend && pnpm test:go && vitest run",
     "test:go": "cd backend && go test ./...",
     "test:e2e": "playwright test",
