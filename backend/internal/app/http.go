@@ -25,6 +25,9 @@ import (
 type deleter interface {
 	Delete(context.Context, string) error
 }
+type reader interface {
+	MarkRead(context.Context, string) error
+}
 type HTTP struct {
 	cfg      config.Config
 	store    *sms.Store
@@ -56,7 +59,40 @@ func NewHTTP(c config.Config, s *sms.Store, m deleter, static fs.FS, l *slog.Log
 	mux.HandleFunc("/api/sms/", h.protect(h.message))
 	mux.HandleFunc("/api/status", h.protect(h.status))
 	mux.Handle("/", http.FileServer(http.FS(static)))
-	return h.secureHeaders(mux)
+	return h.secureHeaders(h.accessLog(mux))
+}
+
+type accessLogWriter struct {
+	http.ResponseWriter
+	status int
+	bytes  int
+}
+
+func (w *accessLogWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *accessLogWriter) Write(body []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	n, err := w.ResponseWriter.Write(body)
+	w.bytes += n
+	return n, err
+}
+
+func (h *HTTP) accessLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		logged := &accessLogWriter{ResponseWriter: w}
+		next.ServeHTTP(logged, r)
+		status := logged.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		h.logger.Info("http request", "method", r.Method, "path", r.URL.Path, "status", status, "bytes", logged.bytes, "duration_ms", time.Since(started).Seconds()*1000)
+	})
 }
 func (h *HTTP) secureHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -211,8 +247,40 @@ func (h *HTTP) messages(w http.ResponseWriter, r *http.Request) {
 }
 func (h *HTTP) message(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/sms/")
+	markRead := strings.HasSuffix(id, "/read")
+	if markRead {
+		id = strings.TrimSuffix(id, "/read")
+	}
 	if id == "" || strings.Contains(id, "/") {
 		http.NotFound(w, r)
+		return
+	}
+	if markRead {
+		if r.Method != http.MethodPost {
+			method(w, http.MethodPost)
+			return
+		}
+		m, ok := h.store.Get(id)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		if m.Read {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		modem, ok := h.modem.(reader)
+		if !ok {
+			h.jsonError(w, http.StatusNotImplemented, "The modem does not support read-state updates.")
+			return
+		}
+		if err := modem.MarkRead(r.Context(), id); err != nil {
+			h.logger.Warn("SMS read-state update failed", "error", err)
+			h.jsonError(w, http.StatusBadGateway, "The modem could not mark this message as read.")
+			return
+		}
+		h.store.MarkRead(id)
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodDelete {

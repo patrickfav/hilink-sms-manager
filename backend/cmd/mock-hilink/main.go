@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
@@ -31,12 +33,19 @@ type message struct {
 }
 
 type modem struct {
-	mu       sync.RWMutex
-	nextID   int
-	messages []message
+	mu        sync.RWMutex
+	nextID    int
+	messages  []message
+	publicKey *rsa.PrivateKey
 }
 
-func newModem() *modem { return &modem{nextID: 1} }
+func newModem() *modem {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		panic(err)
+	}
+	return &modem{nextID: 1, publicKey: key}
+}
 
 func (m *modem) routes() http.Handler {
 	mux := http.NewServeMux()
@@ -53,6 +62,10 @@ func (m *modem) routes() http.Handler {
 	mux.HandleFunc("GET /__mock/messages", m.listJSON)
 	mux.HandleFunc("POST /__mock/messages", m.inject)
 	mux.HandleFunc("GET /api/webserver/SesTokInfo", m.session)
+	mux.HandleFunc("GET /api/webserver/publickey", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/xml; charset=UTF-8")
+		_, _ = fmt.Fprintf(w, "<response><encpubkeye>%x</encpubkeye><encpubkeyn>%s</encpubkeyn></response>", m.publicKey.PublicKey.E, m.publicKey.PublicKey.N.Text(16))
+	})
 	mux.HandleFunc("GET /api/user/state-login", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/xml; charset=UTF-8")
 		w.Header().Set("__RequestVerificationToken", verificationToken)
@@ -64,6 +77,7 @@ func (m *modem) routes() http.Handler {
 		_, _ = io.WriteString(w, `<response>OK</response>`)
 	})
 	mux.HandleFunc("POST /api/sms/sms-list", m.listXML)
+	mux.HandleFunc("POST /api/sms/set-read", m.setRead)
 	mux.HandleFunc("POST /api/sms/delete-sms", m.delete)
 	return mux
 }
@@ -178,6 +192,34 @@ func (m *modem) delete(w http.ResponseWriter, r *http.Request) {
 	for i, item := range m.messages {
 		if item.Index == request.Index {
 			m.messages = append(m.messages[:i], m.messages[i+1:]...)
+			found = true
+			break
+		}
+	}
+	m.mu.Unlock()
+	if !found {
+		http.Error(w, "message not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/xml; charset=UTF-8")
+	w.Header().Set("__RequestVerificationToken", verificationToken)
+	_, _ = io.WriteString(w, `<response>OK</response>`)
+}
+
+func (m *modem) setRead(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+	var request struct {
+		Index int `xml:"Index"`
+	}
+	if err := xml.NewDecoder(r.Body).Decode(&request); err != nil || request.Index < 1 {
+		http.Error(w, "invalid XML request", http.StatusBadRequest)
+		return
+	}
+	m.mu.Lock()
+	found := false
+	for i := range m.messages {
+		if m.messages[i].Index == request.Index {
+			m.messages[i].Read = true
 			found = true
 			break
 		}

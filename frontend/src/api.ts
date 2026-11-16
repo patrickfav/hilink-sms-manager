@@ -4,6 +4,10 @@ export type Status = {
   lastSync: string | null
   error?: string
   messageCount: number
+  phoneNumber?: string
+  deviceName?: string
+  softwareVersion?: string
+  webUIVersion?: string
 }
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -25,5 +29,7 @@ export const api = {
   logout: () => request('/api/auth/logout', { method: 'POST' }),
   inbox: () => request<{ messages: SMS[]; status: Status }>('/api/sms'),
   message: (id: string) => request<SMS>(`/api/sms/${encodeURIComponent(id)}`),
+  markRead: (id: string) =>
+    request<void>(`/api/sms/${encodeURIComponent(id)}/read`, { method: 'POST' }),
   delete: (id: string) => request<void>(`/api/sms/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 }

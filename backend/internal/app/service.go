@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,6 +16,9 @@ import (
 type modem interface {
 	List(context.Context) ([]sms.Message, error)
 	Delete(context.Context, string) error
+}
+type deviceInfoProvider interface {
+	DeviceInfo(context.Context) (sms.DeviceInfo, error)
 }
 
 type Forwarder struct {
@@ -54,14 +58,15 @@ type statusError struct{ code int }
 func (e *statusError) Error() string { return "Slack webhook returned a non-success status" }
 
 type Service struct {
-	modem       modem
-	store       *sms.Store
-	forwarder   *Forwarder
-	interval    time.Duration
-	logger      *slog.Logger
-	mu          sync.Mutex
-	seen        map[string]struct{}
-	initialized bool
+	modem          modem
+	store          *sms.Store
+	forwarder      *Forwarder
+	interval       time.Duration
+	logger         *slog.Logger
+	mu             sync.Mutex
+	seen           map[string]struct{}
+	initialized    bool
+	authRetryAfter time.Time
 }
 
 func NewService(m modem, s *sms.Store, f *Forwarder, d time.Duration, l *slog.Logger) *Service {
@@ -83,13 +88,34 @@ func (s *Service) Run(ctx context.Context) {
 }
 
 func (s *Service) poll(ctx context.Context, initial bool) {
+	s.mu.Lock()
+	if time.Now().Before(s.authRetryAfter) {
+		s.mu.Unlock()
+		return
+	}
+	s.mu.Unlock()
 	messages, err := s.modem.List(ctx)
 	if err != nil {
+		if strings.Contains(err.Error(), "modem login returned error") {
+			s.mu.Lock()
+			s.authRetryAfter = time.Now().Add(5 * time.Minute)
+			s.mu.Unlock()
+		}
 		s.store.Failure("Modem is unavailable; showing the last successful sync.")
 		s.logger.Warn("modem poll failed", "error", err)
 		return
 	}
+	if initial {
+		if provider, ok := s.modem.(deviceInfoProvider); ok {
+			if info, infoErr := provider.DeviceInfo(ctx); infoErr == nil {
+				s.store.SetDeviceInfo(info)
+			} else {
+				s.logger.Debug("modem device information unavailable", "error", infoErr)
+			}
+		}
+	}
 	s.mu.Lock()
+	s.authRetryAfter = time.Time{}
 	baseline := initial || !s.initialized
 	newMessages := []sms.Message{}
 	next := make(map[string]struct{}, len(messages))

@@ -18,6 +18,13 @@ type Message struct {
 	Read       bool      `json:"read"`
 }
 
+type DeviceInfo struct {
+	PhoneNumber     string
+	DeviceName      string
+	SoftwareVersion string
+	WebUIVersion    string
+}
+
 // Identity deliberately excludes mutable fields such as read status.
 func Identity(m Message) string {
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%d\x00%s\x00%s", m.ID, m.ReceivedAt.Unix(), m.Sender, m.Text)))
@@ -30,6 +37,7 @@ type Store struct {
 	lastSync  time.Time
 	lastError string
 	connected bool
+	device    DeviceInfo
 }
 
 func NewStore() *Store { return &Store{} }
@@ -79,11 +87,33 @@ func (s *Store) Remove(id string) {
 	}
 }
 
+func (s *Store) MarkRead(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.messages {
+		if s.messages[i].ID == id {
+			s.messages[i].Read = true
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Store) SetDeviceInfo(info DeviceInfo) {
+	s.mu.Lock()
+	s.device = info
+	s.mu.Unlock()
+}
+
 type Status struct {
-	Connected    bool       `json:"connected"`
-	LastSync     *time.Time `json:"lastSync"`
-	Error        string     `json:"error,omitempty"`
-	MessageCount int        `json:"messageCount"`
+	Connected       bool       `json:"connected"`
+	LastSync        *time.Time `json:"lastSync"`
+	Error           string     `json:"error,omitempty"`
+	MessageCount    int        `json:"messageCount"`
+	PhoneNumber     string     `json:"phoneNumber,omitempty"`
+	DeviceName      string     `json:"deviceName,omitempty"`
+	SoftwareVersion string     `json:"softwareVersion,omitempty"`
+	WebUIVersion    string     `json:"webUIVersion,omitempty"`
 }
 
 func (s *Store) Status() Status {
@@ -94,5 +124,10 @@ func (s *Store) Status() Status {
 		t := s.lastSync
 		synced = &t
 	}
-	return Status{s.connected, synced, s.lastError, len(s.messages)}
+	return Status{
+		Connected: s.connected, LastSync: synced, Error: s.lastError,
+		MessageCount: len(s.messages), PhoneNumber: s.device.PhoneNumber,
+		DeviceName: s.device.DeviceName, SoftwareVersion: s.device.SoftwareVersion,
+		WebUIVersion: s.device.WebUIVersion,
+	}
 }

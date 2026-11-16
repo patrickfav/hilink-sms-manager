@@ -7,6 +7,7 @@ describe('detectOTP', () => {
     expect(detectOTP('Ihr Sicherheitscode lautet 482913.')).toBe('482913')
     expect(detectOTP('Ihr Verifizierungscode lautet 482913.')).toBe('482913')
     expect(detectOTP('Your code is 1234')).toBe('1234')
+    expect(detectOTP('Your verification code is 8 3 4 2 1.')).toBe('83421')
   })
 
   it('accepts a standalone six digit code and ignores other numbers', () => {

@@ -16,9 +16,10 @@ import (
 )
 
 type fakeModem struct {
-	mu       sync.Mutex
-	messages []sms.Message
-	err      error
+	mu              sync.Mutex
+	messages        []sms.Message
+	err             error
+	deviceInfoCalls int
 }
 
 func (m *fakeModem) List(context.Context) ([]sms.Message, error) {
@@ -27,6 +28,25 @@ func (m *fakeModem) List(context.Context) ([]sms.Message, error) {
 	return append([]sms.Message(nil), m.messages...), m.err
 }
 func (*fakeModem) Delete(context.Context, string) error { return nil }
+func (m *fakeModem) DeviceInfo(context.Context) (sms.DeviceInfo, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.deviceInfoCalls++
+	return sms.DeviceInfo{DeviceName: "E8372"}, nil
+}
+
+func TestDeviceInformationIsLoadedOnlyDuringInitialPoll(t *testing.T) {
+	modem := &fakeModem{messages: []sms.Message{{ID: "1"}}}
+	service := NewService(modem, sms.NewStore(), NewForwarder(false, ""), time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	service.poll(context.Background(), true)
+	service.poll(context.Background(), false)
+	modem.mu.Lock()
+	calls := modem.deviceInfoCalls
+	modem.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("device information requested %d times, want 1", calls)
+	}
+}
 
 func TestPollingBaselinesAfterInitialFailureAndForwardsNewOnce(t *testing.T) {
 	deliveries := make(chan string, 4)
