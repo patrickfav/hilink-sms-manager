@@ -641,7 +641,12 @@ export function App() {
               <button type="button" class="secondary" onClick={() => setConfirm(false)}>
                 Cancel
               </button>
-              <button type="button" class="destructive" disabled={loading} onClick={() => void remove()}>
+              <button
+                type="button"
+                class="destructive"
+                disabled={loading}
+                onClick={() => void remove()}
+              >
                 {loading ? 'Deleting…' : 'Delete message'}
               </button>
             </div>
@@ -750,7 +755,12 @@ export function App() {
               <button type="button" class="secondary" onClick={() => setRebootConfirm(false)}>
                 Cancel
               </button>
-              <button type="button" class="destructive" disabled={rebooting} onClick={() => void reboot()}>
+              <button
+                type="button"
+                class="destructive"
+                disabled={rebooting}
+                onClick={() => void reboot()}
+              >
                 {rebooting ? 'Rebooting…' : 'Reboot'}
               </button>
             </div>
