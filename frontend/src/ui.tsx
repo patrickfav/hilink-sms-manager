@@ -703,7 +703,8 @@ export function App() {
         </section>
         <footer class="footer">
           <span class="footer-disclaimer">
-            Self-hosted HiLink API compatible SMS Inbox · reads SMS from your LTE stick · {deviceLabel}
+            Self-hosted HiLink API compatible SMS Inbox · reads SMS from your LTE stick ·{' '}
+            {deviceLabel}
           </span>
         </footer>
       </main>
