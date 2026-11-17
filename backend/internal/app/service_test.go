@@ -48,6 +48,25 @@ func TestDeviceInformationIsLoadedOnlyDuringInitialPoll(t *testing.T) {
 	}
 }
 
+func TestDeviceInformationIsRetriedAfterInitialFailure(t *testing.T) {
+	modem := &fakeModem{err: errors.New("offline")}
+	service := NewService(modem, sms.NewStore(), NewForwarder(false, ""), time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	service.poll(context.Background(), true)
+
+	modem.mu.Lock()
+	modem.err = nil
+	modem.messages = []sms.Message{{ID: "1"}}
+	modem.mu.Unlock()
+	service.poll(context.Background(), false)
+
+	modem.mu.Lock()
+	calls := modem.deviceInfoCalls
+	modem.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("device information requested %d times after recovery, want 1", calls)
+	}
+}
+
 func TestPollingBaselinesAfterInitialFailureAndForwardsNewOnce(t *testing.T) {
 	deliveries := make(chan string, 4)
 	slack := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

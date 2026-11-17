@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -85,6 +86,9 @@ func Load() (Config, error) {
 			return c, errors.New("SLACK_WEBHOOK_URL must be an HTTPS URL when Slack is enabled")
 		}
 	}
+	if err := validateTrustedProxy(c.TrustedProxy); err != nil {
+		return c, err
+	}
 	return c, nil
 }
 func env(key, fallback string) string {
@@ -107,4 +111,20 @@ func parseAddressBook(raw string) (map[string]string, error) {
 		book[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
 	}
 	return book, nil
+}
+
+func validateTrustedProxy(raw string) error {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return errors.New("TRUSTED_PROXY must contain only CIDRs separated by commas")
+		}
+		if _, _, err := net.ParseCIDR(part); err != nil {
+			return fmt.Errorf("TRUSTED_PROXY contains invalid CIDR %q", part)
+		}
+	}
+	return nil
 }

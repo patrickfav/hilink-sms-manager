@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -25,12 +26,12 @@ type storageStatusProvider interface {
 }
 
 type Forwarder struct {
-	enabled     bool
-	webhook     string
-	client      *http.Client
-	addressBook map[string]string
+	enabled        bool
+	webhook        string
+	client         *http.Client
+	addressBook    map[string]string
 	receiverNumber string
-	publicURL   string
+	publicURL      string
 }
 
 func NewForwarder(enabled bool, webhook string) *Forwarder {
@@ -59,6 +60,7 @@ func (f *Forwarder) Send(ctx context.Context, m sms.Message) error {
 		return err
 	}
 	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return &statusError{resp.StatusCode}
 	}
@@ -70,22 +72,33 @@ type statusError struct{ code int }
 func (e *statusError) Error() string { return "Slack webhook returned a non-success status" }
 
 type Service struct {
-	modem          modem
-	store          *sms.Store
-	forwarder      *Forwarder
-	interval       time.Duration
-	logger         *slog.Logger
-	mu             sync.Mutex
-	seen           map[string]struct{}
-	initialized    bool
-	authRetryAfter time.Time
+	modem           modem
+	store           *sms.Store
+	forwarder       *Forwarder
+	interval        time.Duration
+	logger          *slog.Logger
+	mu              sync.Mutex
+	seen            map[string]struct{}
+	initialized     bool
+	deviceLoaded    bool
+	authRetryAfter  time.Time
+	deliveryQueue   chan sms.Message
+	deliveryMu      sync.RWMutex
+	deliveryCancel  context.CancelFunc
+	deliveryWG      sync.WaitGroup
+	deliveryStarted bool
 }
 
 func NewService(m modem, s *sms.Store, f *Forwarder, d time.Duration, l *slog.Logger) *Service {
-	return &Service{modem: m, store: s, forwarder: f, interval: d, logger: l, seen: make(map[string]struct{})}
+	if d <= 0 {
+		d = time.Second
+	}
+	return &Service{modem: m, store: s, forwarder: f, interval: d, logger: l, seen: make(map[string]struct{}), deliveryQueue: make(chan sms.Message, 64)}
 }
 
 func (s *Service) Run(ctx context.Context) {
+	s.startDeliveryWorkers(ctx)
+	defer s.stopDeliveryWorkers()
 	s.poll(ctx, true)
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
@@ -108,7 +121,8 @@ func (s *Service) poll(ctx context.Context, initial bool) {
 	s.mu.Unlock()
 	messages, err := s.modem.List(ctx)
 	if err != nil {
-		if strings.Contains(err.Error(), "modem login returned error") {
+		var authFailure interface{ AuthFailure() }
+		if errors.As(err, &authFailure) {
 			s.mu.Lock()
 			s.authRetryAfter = time.Now().Add(5 * time.Minute)
 			s.mu.Unlock()
@@ -117,14 +131,24 @@ func (s *Service) poll(ctx context.Context, initial bool) {
 		s.logger.Warn("modem poll failed", "error", err)
 		return
 	}
-	if initial {
+	s.mu.Lock()
+	needDeviceInfo := !s.deviceLoaded
+	s.mu.Unlock()
+	if needDeviceInfo {
 		if provider, ok := s.modem.(deviceInfoProvider); ok {
 			if info, infoErr := provider.DeviceInfo(ctx); infoErr == nil {
 				s.store.SetDeviceInfo(info)
 				s.forwarder.SetReceiverNumber(info.PhoneNumber)
+				s.mu.Lock()
+				s.deviceLoaded = true
+				s.mu.Unlock()
 			} else {
 				s.logger.Debug("modem device information unavailable", "error", infoErr)
 			}
+		} else {
+			s.mu.Lock()
+			s.deviceLoaded = true
+			s.mu.Unlock()
 		}
 	}
 	if provider, ok := s.modem.(storageStatusProvider); ok {
@@ -151,13 +175,67 @@ func (s *Service) poll(ctx context.Context, initial bool) {
 	s.mu.Unlock()
 	s.store.Replace(messages)
 	for _, m := range newMessages {
-		msg := m
-		go func() {
+		s.enqueueDelivery(ctx, m)
+	}
+}
+
+func (s *Service) startDeliveryWorkers(parent context.Context) {
+	s.deliveryMu.Lock()
+	defer s.deliveryMu.Unlock()
+	if s.deliveryStarted {
+		return
+	}
+	workerCtx, cancel := context.WithCancel(parent)
+	s.deliveryCancel = cancel
+	s.deliveryStarted = true
+	for i := 0; i < 4; i++ {
+		s.deliveryWG.Add(1)
+		go s.deliveryWorker(workerCtx)
+	}
+}
+
+func (s *Service) stopDeliveryWorkers() {
+	s.deliveryMu.RLock()
+	cancel := s.deliveryCancel
+	s.deliveryMu.RUnlock()
+	if cancel == nil {
+		return
+	}
+	cancel()
+	s.deliveryWG.Wait()
+}
+
+func (s *Service) deliveryWorker(ctx context.Context) {
+	defer s.deliveryWG.Done()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case message := <-s.deliveryQueue:
 			sendCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
-			defer cancel()
-			if err := s.forwarder.Send(sendCtx, msg); err != nil {
+			if err := s.forwarder.Send(sendCtx, message); err != nil {
 				s.logger.Warn("Slack delivery failed", "error", err)
 			}
-		}()
+			cancel()
+		}
+	}
+}
+
+func (s *Service) enqueueDelivery(ctx context.Context, message sms.Message) {
+	s.deliveryMu.RLock()
+	started := s.deliveryStarted
+	s.deliveryMu.RUnlock()
+	if !started {
+		sendCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
+		defer cancel()
+		if err := s.forwarder.Send(sendCtx, message); err != nil {
+			s.logger.Warn("Slack delivery failed", "error", err)
+		}
+		return
+	}
+	select {
+	case s.deliveryQueue <- message:
+	default:
+		s.logger.Warn("Slack delivery queue full; dropping message", "message_id", message.ID)
 	}
 }

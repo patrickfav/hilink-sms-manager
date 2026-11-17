@@ -40,12 +40,24 @@ type HTTP struct {
 	logger   *slog.Logger
 	trusted  []*net.IPNet
 	mu       sync.Mutex
-	attempts map[string][]time.Time
+	attempts map[string]loginAttempt
 	revoked  map[string]int64
 }
 
+type loginAttempt struct {
+	windowStart time.Time
+	lastSeen    time.Time
+	count       int
+}
+
+const (
+	loginWindow        = 5 * time.Minute
+	loginAttemptLimit  = 5
+	maxLoginPrincipals = 10000
+)
+
 func NewHTTP(c config.Config, s *sms.Store, m deleter, static fs.FS, l *slog.Logger) http.Handler {
-	h := &HTTP{cfg: c, store: s, modem: m, static: static, logger: l, attempts: map[string][]time.Time{}, revoked: map[string]int64{}}
+	h := &HTTP{cfg: c, store: s, modem: m, static: static, logger: l, attempts: map[string]loginAttempt{}, revoked: map[string]int64{}}
 	for _, part := range strings.Split(c.TrustedProxy, ",") {
 		if _, n, e := net.ParseCIDR(strings.TrimSpace(part)); e == nil {
 			h.trusted = append(h.trusted, n)
@@ -74,6 +86,10 @@ func NewHTTP(c config.Config, s *sms.Store, m deleter, static fs.FS, l *slog.Log
 		_, _ = w.Write(index)
 	}
 	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
+			h.jsonError(w, http.StatusNotFound, "Not found.")
+			return
+		}
 		assetPath := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
 		if assetPath == "" {
 			assetPath = "index.html"
@@ -117,7 +133,7 @@ func (h *HTTP) accessLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
 		logged := &accessLogWriter{ResponseWriter: w}
-		h.logger.Info("http request", "method", r.Method, "path", r.URL.Path, "remote", clientIP(r), "request_bytes", r.ContentLength)
+		h.logger.Info("http request", "method", r.Method, "path", r.URL.Path, "remote", h.clientIP(r), "request_bytes", r.ContentLength)
 		next.ServeHTTP(logged, r)
 		status := logged.status
 		if status == 0 {
@@ -190,7 +206,7 @@ func (h *HTTP) login(w http.ResponseWriter, r *http.Request) {
 	if !allowedJSON(r, w) {
 		return
 	}
-	ip := clientIP(r)
+	ip := h.clientIP(r)
 	if h.limited(ip) {
 		h.jsonError(w, http.StatusTooManyRequests, "Too many attempts. Try again later.")
 		return
@@ -309,6 +325,14 @@ func normalizePhone(value string) string {
 	}
 	return normalized.String()
 }
+
+func modemIndex(message sms.Message) string {
+	if message.Index > 0 {
+		return strconv.Itoa(message.Index)
+	}
+	return message.ID
+}
+
 func (h *HTTP) message(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/api/sms/")
 	markRead := strings.HasSuffix(id, "/read")
@@ -338,7 +362,7 @@ func (h *HTTP) message(w http.ResponseWriter, r *http.Request) {
 			h.jsonError(w, http.StatusNotImplemented, "The modem does not support read-state updates.")
 			return
 		}
-		if err := modem.MarkRead(r.Context(), id); err != nil {
+		if err := modem.MarkRead(r.Context(), modemIndex(m)); err != nil {
 			h.logger.Warn("SMS read-state update failed", "error", err)
 			h.jsonError(w, http.StatusBadGateway, "The modem could not mark this message as read.")
 			return
@@ -357,7 +381,7 @@ func (h *HTTP) message(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodDelete {
-		if err := h.modem.Delete(r.Context(), id); err != nil {
+		if err := h.modem.Delete(r.Context(), modemIndex(m)); err != nil {
 			h.logger.Warn("SMS deletion failed", "error", err)
 			h.jsonError(w, http.StatusBadGateway, "The modem could not delete this message.")
 			return
@@ -446,22 +470,52 @@ func (h *HTTP) limited(ip string) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	now := time.Now()
-	items := h.attempts[ip][:0]
-	for _, t := range h.attempts[ip] {
-		if now.Sub(t) < 5*time.Minute {
-			items = append(items, t)
+	for key, attempt := range h.attempts {
+		if now.Sub(attempt.lastSeen) >= loginWindow {
+			delete(h.attempts, key)
 		}
 	}
-	h.attempts[ip] = append(items, now)
-	return len(h.attempts[ip]) > 5
+	if _, exists := h.attempts[ip]; !exists && len(h.attempts) >= maxLoginPrincipals {
+		oldestKey := ""
+		var oldest time.Time
+		for key, attempt := range h.attempts {
+			if oldestKey == "" || attempt.lastSeen.Before(oldest) {
+				oldestKey, oldest = key, attempt.lastSeen
+			}
+		}
+		if oldestKey != "" {
+			delete(h.attempts, oldestKey)
+		}
+	}
+	attempt := h.attempts[ip]
+	if attempt.windowStart.IsZero() || now.Sub(attempt.windowStart) >= loginWindow {
+		attempt = loginAttempt{windowStart: now}
+	}
+	attempt.count++
+	attempt.lastSeen = now
+	h.attempts[ip] = attempt
+	return attempt.count > loginAttemptLimit
 }
 func (h *HTTP) clearAttempts(ip string) { h.mu.Lock(); delete(h.attempts, ip); h.mu.Unlock() }
-func clientIP(r *http.Request) string {
+func remoteIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err == nil {
 		return host
 	}
 	return r.RemoteAddr
+}
+func (h *HTTP) clientIP(r *http.Request) string {
+	peer := remoteIP(r)
+	if !h.isTrusted(r) {
+		return peer
+	}
+	for _, forwarded := range strings.Split(r.Header.Get("X-Forwarded-For"), ",") {
+		candidate := strings.TrimSpace(forwarded)
+		if net.ParseIP(candidate) != nil {
+			return candidate
+		}
+	}
+	return peer
 }
 func allowedJSON(r *http.Request, w http.ResponseWriter) bool {
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {

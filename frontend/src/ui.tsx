@@ -35,6 +35,7 @@ export function detectOTP(text: string) {
 }
 function timeLabel(raw: string) {
   const date = new Date(raw)
+  if (Number.isNaN(date.getTime()) || date.getUTCFullYear() <= 1) return 'Unknown date'
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: 'medium',
     timeStyle: 'short',
@@ -218,6 +219,7 @@ export function App() {
   const refreshInterval = 10000
   const unreadCount = items.filter((message) => !message.read).length
   const current = items.find((m) => m.id === selected) || null
+  const currentCode = current ? detectOTP(current.text) : null
   const filtered = useMemo(
     () => items.filter((m) => `${m.sender} ${m.text}`.toLowerCase().includes(query.toLowerCase())),
     [items, query],
@@ -397,23 +399,43 @@ export function App() {
                 onClick={() => setDeviceInfoOpen(true)}
               >
                 <span class="dot green" />
-                <span class="status-icon modem-icon" style={`--status-icon: url("${modemIcon}")`} aria-hidden="true" />
+                <span
+                  class="status-icon modem-icon"
+                  style={`--status-icon: url("${modemIcon}")`}
+                  aria-hidden="true"
+                />
                 <span>Modem connected</span>
               </button>
             ) : (
               <div class="connection">
                 <span class={`dot ${status?.connected ? 'green' : 'gray'}`} />
-                <span class="status-icon modem-icon" style={`--status-icon: url("${modemIcon}")`} aria-hidden="true" />
+                <span
+                  class="status-icon modem-icon"
+                  style={`--status-icon: url("${modemIcon}")`}
+                  aria-hidden="true"
+                />
                 <span>Connecting to modem</span>
               </div>
             )}
             <span
               class="connection slack-connection"
-              title={status?.slackEnabled ? 'Slack notifications enabled' : 'Slack notifications disabled'}
-              aria-label={status?.slackEnabled ? 'Slack notifications enabled' : 'Slack notifications disabled'}
+              title={
+                status?.slackEnabled
+                  ? 'Slack notifications enabled'
+                  : 'Slack notifications disabled'
+              }
+              aria-label={
+                status?.slackEnabled
+                  ? 'Slack notifications enabled'
+                  : 'Slack notifications disabled'
+              }
             >
               <span class={`dot ${status?.slackEnabled ? 'green' : 'gray'}`} />
-              <span class="status-icon slack-icon" style={`--status-icon: url("${slackIcon}")`} aria-hidden="true" />
+              <span
+                class="status-icon slack-icon"
+                style={`--status-icon: url("${slackIcon}")`}
+                aria-hidden="true"
+              />
               <span>Slack {status?.slackEnabled ? 'enabled' : 'disabled'}</span>
             </span>
             <span class="top-divider" />
@@ -443,9 +465,7 @@ export function App() {
             <div class="heading-subline">
               <p class="muted">Messages received on your modem appear here.</p>
               {status?.lastSync && !status.error && !error && !status.storageFull && (
-                <span class="sync-inline">
-                  Last synced {timeLabel(status.lastSync)}
-                </span>
+                <span class="sync-inline">Last synced {timeLabel(status.lastSync)}</span>
               )}
             </div>
           </div>
@@ -653,20 +673,18 @@ export function App() {
                     </a>
                   )}
                   <p class="detail-date">Received {timeLabel(current.receivedAt)}</p>
-                  <div class="message-text">
-                    {linkifyText(current.text)}
-                  </div>
+                  <div class="message-text">{linkifyText(current.text)}</div>
                   <div class="char-count">{current.text.length} characters</div>
-                  {detectOTP(current.text) && (
+                  {currentCode && (
                     <div class="code-card">
                       <div>
                         <span class="eyebrow">VERIFICATION CODE</span>
-                        <strong>{detectOTP(current.text)}</strong>
+                        <strong>{currentCode}</strong>
                       </div>
                       <button
                         type="button"
                         class="secondary copy-button"
-                        onClick={() => void copy(detectOTP(current.text)!)}
+                        onClick={() => void copy(currentCode)}
                       >
                         <Copy size={15} /> Copy code
                       </button>

@@ -14,7 +14,7 @@ COPY backend/go.mod ./
 RUN go mod download
 COPY backend ./
 COPY --from=frontend /src/backend/web/dist ./web/dist
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/hilink-sms ./cmd/server
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/hilink-sms ./cmd/server
 
 FROM gcr.io/distroless/static-debian13:nonroot
 COPY --from=backend /out/hilink-sms /hilink-sms

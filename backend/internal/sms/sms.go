@@ -38,6 +38,12 @@ type StorageStatus struct {
 
 // Identity deliberately excludes mutable fields such as read status.
 func Identity(m Message) string {
+	if m.ID != "" {
+		return "id:" + m.ID
+	}
+	if m.Index > 0 {
+		return fmt.Sprintf("index:%d", m.Index)
+	}
 	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%d\x00%s\x00%s", m.ID, m.ReceivedAt.Unix(), m.Sender, m.Text)))
 	return hex.EncodeToString(sum[:])
 }
@@ -55,9 +61,10 @@ type Store struct {
 func NewStore() *Store { return &Store{} }
 
 func (s *Store) Replace(messages []Message) {
-	sort.Slice(messages, func(i, j int) bool { return messages[i].ReceivedAt.After(messages[j].ReceivedAt) })
+	snapshot := append([]Message(nil), messages...)
+	sort.Slice(snapshot, func(i, j int) bool { return snapshot[i].ReceivedAt.After(snapshot[j].ReceivedAt) })
 	s.mu.Lock()
-	s.messages = append([]Message{}, messages...)
+	s.messages = append([]Message{}, snapshot...)
 	s.lastSync = time.Now()
 	s.lastError = ""
 	s.connected = true

@@ -23,7 +23,8 @@ func TestSlackPayloadFormatsSenderCodeAndSafeLinks(t *testing.T) {
 	if deepLink != "<https://sms.favho.me/sms/123|Open in HiLink SMS>" {
 		t.Fatalf("unexpected message deep link: %q", deepLink)
 	}
-	body := blocks[2]["elements"].([]slackObject)
+	quote := blocks[2]["elements"].([]slackObject)[0]
+	body := quote["elements"].([]slackObject)
 	received := blocks[1]["elements"].([]slackObject)[0]["text"].(string)
 	if received != "Received <!date^1700000000^{date_short_pretty} at {time}|2023-11-14T22:13:20Z> · +43 660 999999" {
 		t.Fatalf("unexpected received line: %q", received)

@@ -36,6 +36,14 @@ type Client struct {
 	loggedIn           bool
 }
 
+// AuthError identifies a modem authentication failure so callers can apply
+// backoff without matching human-readable error text.
+type AuthError struct{ err error }
+
+func (e *AuthError) Error() string { return e.err.Error() }
+func (e *AuthError) Unwrap() error { return e.err }
+func (e *AuthError) AuthFailure()  {}
+
 func New(raw, user, password string) *Client {
 	u, _ := url.Parse(strings.TrimRight(raw, "/"))
 	jar, _ := cookiejar.New(nil)
@@ -159,8 +167,14 @@ func encryptLoginPayload(payload []byte, key encryptionKey) ([]byte, error) {
 		return nil, errors.New("modem returned an invalid RSA exponent")
 	}
 	publicKey := &rsa.PublicKey{N: modulus, E: int(exponent.Int64())}
+	if publicKey.E < 2 || publicKey.N.BitLen() < 512 {
+		return nil, errors.New("modem returned an invalid RSA public key")
+	}
 	encoded := base64.StdEncoding.EncodeToString(payload)
-	const maxChunk = 245
+	maxChunk := publicKey.Size() - 11
+	if maxChunk <= 0 {
+		return nil, errors.New("modem returned an unusable RSA public key")
+	}
 	var encrypted strings.Builder
 	for start := 0; start < len(encoded); start += maxChunk {
 		end := start + maxChunk
@@ -259,7 +273,7 @@ func (c *Client) login(ctx context.Context) error {
 		return fmt.Errorf("modem login returned HTTP %d", code)
 	}
 	if code := apiErrorCode(loginBody); code != "" {
-		return fmt.Errorf("modem login returned error %s", code)
+		return &AuthError{err: fmt.Errorf("modem login returned error %s", code)}
 	}
 	for _, v := range headers.Values("__RequestVerificationToken") {
 		if strings.TrimSpace(v) != "" {
@@ -304,8 +318,11 @@ func (c *Client) List(ctx context.Context) ([]sms.Message, error) {
 		}
 		all := []sms.Message{}
 		start := 1
-		for page := 0; page < 100; page++ {
-			req := fmt.Sprintf("<?xml version=\"1.0\" encoding=\"UTF-8\"?><request><PageIndex>%d</PageIndex><ReadCount>20</ReadCount><BoxType>1</BoxType><SortType>0</SortType><Ascending>0</Ascending><UnreadPreferred>0</UnreadPreferred></request>", start)
+		const pageSize = 20
+		const maxPages = 10000
+		completed := false
+		for page := 1; page <= maxPages; page++ {
+			req := fmt.Sprintf("<?xml version=\"1.0\" encoding=\"UTF-8\"?><request><PageIndex>%d</PageIndex><ReadCount>%d</ReadCount><BoxType>1</BoxType><SortType>0</SortType><Ascending>0</Ascending><UnreadPreferred>0</UnreadPreferred></request>", start, pageSize)
 			b, _, code, err := c.request(ctx, http.MethodPost, "/api/sms/sms-list", []byte(req), c.token)
 			if err != nil {
 				return nil, err
@@ -323,6 +340,7 @@ func (c *Client) List(ctx context.Context) ([]sms.Message, error) {
 				return nil, fmt.Errorf("invalid SMS response: %w", err)
 			}
 			if out.Count == 0 || len(out.Messages) == 0 {
+				completed = true
 				break
 			}
 			for _, m := range out.Messages {
@@ -332,11 +350,18 @@ func (c *Client) List(ctx context.Context) ([]sms.Message, error) {
 				}
 				t, err := parseDate(m.Date)
 				if err != nil {
-					t = time.Now()
+					t = time.Time{}
 				}
 				all = append(all, sms.Message{ID: id, Index: m.Index, Sender: m.Phone, Text: m.Content, ReceivedAt: t, Read: m.Smstat == "1"})
 			}
+			if out.PageCount > 0 && page >= out.PageCount {
+				completed = true
+				break
+			}
 			start++
+		}
+		if c.loggedIn && !completed {
+			return nil, errors.New("modem SMS list exceeded pagination safety limit")
 		}
 		if c.loggedIn {
 			return all, nil
@@ -345,7 +370,17 @@ func (c *Client) List(ctx context.Context) ([]sms.Message, error) {
 	return nil, errors.New("modem session expired")
 }
 func parseDate(s string) (time.Time, error) {
-	for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02T15:04:05", "2006-01-02 15:04:05-07:00"} {
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05.999999999Z07:00",
+		"2006-01-02T15:04:05.999999999Z07:00",
+		"2006-01-02 15:04:05-07:00",
+		"2006-01-02T15:04:05-07:00",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02T15:04:05.999999999",
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05",
+	} {
 		if t, e := time.Parse(layout, s); e == nil {
 			return t, nil
 		}
@@ -358,10 +393,11 @@ func (c *Client) Delete(ctx context.Context, id string) error {
 	if err := c.ensure(ctx); err != nil {
 		return err
 	}
-	if _, err := strconv.Atoi(id); err != nil {
+	index, err := strconv.Atoi(id)
+	if err != nil || index < 1 {
 		return errors.New("invalid modem message id")
 	}
-	body := fmt.Sprintf("<?xml version=\"1.0\" encoding=\"UTF-8\"?><request><Index>%s</Index></request>", id)
+	body := fmt.Sprintf("<?xml version=\"1.0\" encoding=\"UTF-8\"?><request><Index>%d</Index></request>", index)
 	responseBody, _, code, err := c.request(ctx, http.MethodPost, "/api/sms/delete-sms", []byte(body), c.token)
 	if err != nil {
 		return err
@@ -385,10 +421,11 @@ func (c *Client) MarkRead(ctx context.Context, id string) error {
 	if err := c.ensure(ctx); err != nil {
 		return err
 	}
-	if _, err := strconv.Atoi(id); err != nil {
+	index, err := strconv.Atoi(id)
+	if err != nil || index < 1 {
 		return errors.New("invalid modem message id")
 	}
-	body := fmt.Sprintf("<?xml version=\"1.0\" encoding=\"UTF-8\"?><request><Index>%s</Index></request>", id)
+	body := fmt.Sprintf("<?xml version=\"1.0\" encoding=\"UTF-8\"?><request><Index>%d</Index></request>", index)
 	responseBody, _, code, err := c.request(ctx, http.MethodPost, "/api/sms/set-read", []byte(body), c.token)
 	if err != nil {
 		return err

@@ -22,6 +22,15 @@ func TestParseDate(t *testing.T) {
 	if _, err := parseDate("not a date"); err == nil {
 		t.Fatal("expected invalid date to fail")
 	}
+	for _, input := range []string{
+		"2025-02-03T04:05:06Z",
+		"2025-02-03T04:05:06.123+01:00",
+		"2025-02-03 04:05:06-05:00",
+	} {
+		if _, err := parseDate(input); err != nil {
+			t.Fatalf("parseDate(%q) returned error: %v", input, err)
+		}
+	}
 }
 
 func TestListPaginatesUnicodeAndDeleteUsesModemIndex(t *testing.T) {

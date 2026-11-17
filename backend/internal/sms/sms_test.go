@@ -45,3 +45,17 @@ func TestFailurePreservesSnapshot(t *testing.T) {
 		t.Fatalf("unexpected failure status: %#v", status)
 	}
 }
+
+func TestIdentityUsesStableMessageAddress(t *testing.T) {
+	withDate := Message{ID: "external-id", ReceivedAt: time.Unix(1, 0)}
+	withoutDate := withDate
+	withoutDate.ReceivedAt = time.Time{}
+	if Identity(withDate) != Identity(withoutDate) {
+		t.Fatal("message identity changed when only the parsed date changed")
+	}
+
+	indexed := Message{Index: 7, ReceivedAt: time.Unix(1, 0)}
+	if Identity(indexed) != Identity(Message{Index: 7, ReceivedAt: time.Unix(2, 0)}) {
+		t.Fatal("indexed message identity changed when only the parsed date changed")
+	}
+}

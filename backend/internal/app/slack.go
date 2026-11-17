@@ -26,10 +26,6 @@ func formatSlackTimestamp(t time.Time) string {
 	return strconv.FormatInt(t.Unix(), 10)
 }
 
-func slackPayload(m sms.Message) slackObject {
-	return slackPayloadForReceiver(m, "", "https://sms.favho.me")
-}
-
 func slackPayloadForReceiver(m sms.Message, receiverNumber, publicURL string) slackObject {
 	sender := m.Sender
 	if m.SenderName != "" {
@@ -38,8 +34,12 @@ func slackPayloadForReceiver(m sms.Message, receiverNumber, publicURL string) sl
 	body, fallback, _ := slackBody(m.Text)
 	heading := slackText("SMS from " + sender)
 	heading["style"] = slackObject{"bold": true}
-	received := m.ReceivedAt.Format(time.RFC3339)
-	receivedLine := "Received <!date^" + formatSlackTimestamp(m.ReceivedAt) + "^{date_short_pretty} at {time}|" + received + ">"
+	received := "unknown time"
+	receivedLine := "Received " + received
+	if !m.ReceivedAt.IsZero() {
+		received = m.ReceivedAt.UTC().Format(time.RFC3339)
+		receivedLine = "Received <!date^" + formatSlackTimestamp(m.ReceivedAt) + "^{date_short_pretty} at {time}|" + received + ">"
+	}
 	if receiverNumber != "" {
 		receivedLine += " · " + receiverNumber
 	}

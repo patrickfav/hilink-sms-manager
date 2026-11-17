@@ -116,3 +116,12 @@ func TestLoginRateLimit(t *testing.T) {
 		}
 	}
 }
+
+func TestModemIndexPrefersPhysicalIndexOverPublicID(t *testing.T) {
+	if got := modemIndex(sms.Message{ID: "external-id", Index: 41}); got != "41" {
+		t.Fatalf("modemIndex() = %q, want 41", got)
+	}
+	if got := modemIndex(sms.Message{ID: "41"}); got != "41" {
+		t.Fatalf("modemIndex() fallback = %q, want 41", got)
+	}
+}
