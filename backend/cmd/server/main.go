@@ -107,6 +107,7 @@ func main() {
 	client.SetLogger(logger)
 	store := sms.NewStore()
 	forwarder := app.NewForwarder(cfg.SlackEnabled, cfg.SlackWebhook)
+	forwarder.SetAddressBook(cfg.AddressBook)
 	service := app.NewService(client, store, forwarder, 2*cfg.PollInterval, logger)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

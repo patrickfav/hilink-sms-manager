@@ -52,9 +52,11 @@ func TestPollingBaselinesAfterInitialFailureAndForwardsNewOnce(t *testing.T) {
 	deliveries := make(chan string, 4)
 	slack := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
-		var payload map[string]string
+		var payload struct {
+			Text string `json:"text"`
+		}
 		_ = json.Unmarshal(body, &payload)
-		deliveries <- payload["text"]
+		deliveries <- payload.Text
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer slack.Close()

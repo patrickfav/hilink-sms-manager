@@ -255,13 +255,16 @@ func (h *HTTP) messages(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"messages": messages, "status": h.store.Status()})
 }
 func (h *HTTP) withContactName(message sms.Message) sms.Message {
-	if name, ok := h.cfg.AddressBook[message.Sender]; ok {
+	return withContactName(message, h.cfg.AddressBook)
+}
+func withContactName(message sms.Message, book map[string]string) sms.Message {
+	if name, ok := book[message.Sender]; ok {
 		message.SenderName = name
 		return message
 	}
 	normalized := normalizePhone(message.Sender)
 	if normalized != "" {
-		for number, name := range h.cfg.AddressBook {
+		for number, name := range book {
 			if normalizePhone(number) == normalized {
 				message.SenderName = name
 				break

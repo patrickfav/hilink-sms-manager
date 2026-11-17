@@ -1,10 +1,94 @@
 # HiLink SMS Manager
 
-A single-container web inbox for SMS stored on a Huawei HiLink modem. It keeps only an in-memory snapshot, detects common numeric verification codes, and can best-effort forward newly received messages to Slack.
+A self-hosted web inbox for SMS received by a Huawei HiLink modem. Read and search messages, copy detected verification codes, and delete SMS from the modem. Optionally forward new messages to Slack.
+
+![HiLink SMS Manager inbox in dark mode](doc/screenshot-darkmode.webp)
+
+The app runs in a single container with no database. Messages stay on the modem; the app keeps an in-memory copy. It cannot send SMS.
+
+## Run with Docker Compose
+
+You need Docker Compose, a reachable HiLink modem, and its administrator credentials.
+
+1. Generate a bcrypt hash for your **web login** password using `htpasswd` (Apache utilities). This prompts for the password:
+
+   ```sh
+   htpasswd -nBC 12 admin | cut -d: -f2
+   ```
+
+2. Create a `.env` file in the repository root:
+
+   ```dotenv
+   HILINK_URL=http://192.168.8.1
+   HILINK_USERNAME=admin
+   HILINK_PASSWORD='your-modem-password'
+   AUTH_USERNAME=admin
+   AUTH_PASSWORD_HASH='paste-the-bcrypt-hash-here'
+   ```
+
+   Keep the hash in single quotes so Compose preserves its `$` characters. Protect this file with `chmod 600 .env` and do not commit it. Web login credentials are separate from modem credentials.
+
+3. From the repository root, build and start the app using [the example Compose file](doc/example.compose.yaml):
+
+   ```sh
+   docker compose --env-file .env -f doc/example.compose.yaml up -d --build
+   ```
+
+4. Open <http://localhost:8080> and sign in with your web login credentials.
+
+The supplied Compose file listens only on loopback. For remote access, put it behind an HTTPS reverse proxy and set `TRUSTED_PROXY` to the proxy's source CIDR. The app serves HTTP internally and ignores forwarded headers from untrusted peers.
+
+## Using the inbox
+
+- Select a message to read it and mark it read on the modem. HiLink does not support marking it unread again.
+- Search by sender number or message text. Use the copy button for detected verification codes; detection can mistake other numbers for codes.
+- Delete a message to **permanently remove it from the modem**, freeing SMS storage.
+- Switch between light and dark themes; your browser remembers the choice.
+
+The inbox syncs automatically, every 30 seconds by default. If the modem is unreachable, the app keeps the last successful snapshot. Restarting the app clears its cache and signs you out; messages remain on the modem.
+
+### Slack forwarding
+
+Set `SLACK_ENABLED=true` and `SLACK_WEBHOOK_URL` to an HTTPS Slack incoming webhook in `.env`, then recreate the container:
+
+```sh
+docker compose --env-file .env -f doc/example.compose.yaml up -d
+```
+
+Only messages arriving after the startup sync are forwarded. Existing messages are not sent to Slack. Delivery is best-effort, with no durable retry queue.
+
+## Configuration
+
+All settings use environment variables. The four credentials in the setup example are required; other settings are optional.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `HILINK_URL` | `http://192.168.8.1` | Modem address |
+| `HILINK_USERNAME` | — | Modem administrator username |
+| `HILINK_PASSWORD` | — | Modem administrator password |
+| `AUTH_USERNAME` | — | Web login username |
+| `AUTH_PASSWORD_HASH` | — | bcrypt hash of the web login password |
+| `ADDRESS_BOOK` | — | Contact names, e.g. `+15550100:Alex\|+15550101:Sam` |
+| `POLL_INTERVAL` | `15s` | Modem sync and Slack detection run every **2 ×** this value |
+| `SESSION_TTL` | `12h` | Web login session lifetime |
+| `SLACK_ENABLED` | `false` | Enable Slack forwarding |
+| `SLACK_WEBHOOK_URL` | — | Required when Slack is enabled |
+| `LISTEN_ADDR` | `:8080` | HTTP listen address |
+| `TRUSTED_PROXY` | — | Comma-separated proxy CIDRs allowed to assert HTTPS and forwarded host |
+
+To use `ADDRESS_BOOK` or `SESSION_TTL` with the supplied Compose file, add them to the service's `environment` section. `LISTEN_ADDR` is fixed to `:8080` there.
+
+## Modem compatibility and troubleshooting
+
+Verified on a **Huawei E8372**, Web UI **17.100.19.00.1217**: login, message retrieval, and marking messages read. Deletion on physical hardware and E353/E3131 compatibility remain unverified. Other firmware may behave differently.
+
+- **Login error `108006`:** the modem rejected the credentials. This E8372 Web UI truncates passwords to 15 characters; configure the actual password accepted by the modem, not a longer pasted value. The app sends `HILINK_PASSWORD` unchanged.
+- **Lockout error `108007`:** stop retrying and check the credentials and firmware's password limit.
+- **Development config changes not taking effect:** restart `pnpm dev` after editing `.env.dev`; hot reload does not reload environment variables.
 
 ## Development
 
-Prerequisites: Go 1.27.3+, Node.js 26+, and pnpm 12.5+.
+Requires Go 1.27.3+, Node.js 26+, and pnpm 12.5.
 
 ```sh
 pnpm install
@@ -12,9 +96,9 @@ cd backend && go mod download && cd ..
 pnpm dev
 ```
 
-`pnpm dev` creates a local `.env.dev` from `.env.dev.example` on first run, then starts the mock modem, Go backend with Air reload, and Vite together. Open `http://localhost:5173` and sign in with `admin` / `admin`. These defaults are for local development only. The frontend proxies `/api` to `127.0.0.1:8080`. Use `pnpm build` to generate frontend assets and compile `dist/hilink-sms`.
+On first run, this creates `.env.dev` from [.env.dev.example](.env.dev.example). It starts a mock modem, the Go backend with hot reload, and Vite. Open <http://localhost:5173> and sign in with `admin` / `admin` when using the example defaults. To use a real modem, update the `HILINK_*` values in `.env.dev` and restart.
 
-The mock starts with an empty inbox. Inject a message with:
+The mock inbox starts empty. Add a message:
 
 ```sh
 curl -X POST http://127.0.0.1:18080/__mock/messages \
@@ -22,57 +106,12 @@ curl -X POST http://127.0.0.1:18080/__mock/messages \
   -d '{"sender":"+1 555 0100","text":"Your verification code is 482913."}'
 ```
 
-The SMS appears after the next backend poll. Delete it in the app as usual. The mock stores messages only in memory and binds to loopback by default; it implements only the API subset used by this app and does not establish compatibility with physical modem firmware.
+It appears after the next poll. Mock messages are held in memory and lost on restart.
 
-Commands: `pnpm test`, `pnpm test:e2e`, `pnpm lint`, `pnpm lint:fix`, `pnpm fmt`, `pnpm fmt:check`, and `pnpm typecheck`.
-
-## Configuration
-
-All application configuration is through environment variables:
-
-| Variable | Required | Default / meaning |
-|---|---:|---|
-| `HILINK_URL` | no | `http://192.168.8.1` |
-| `HILINK_USERNAME` | yes | Modem administrator user |
-| `HILINK_PASSWORD` | yes | Modem administrator password |
-| `ADDRESS_BOOK` | no | `number:name` pairs separated by `|`, for example `+436991234456:Patrick Favre|+436992234456:Something else` |
-| `AUTH_USERNAME` | yes | Web login user |
-| `AUTH_PASSWORD_HASH` | yes | bcrypt password hash |
-| `POLL_INTERVAL` | no | `15s`; backend modem polling and Slack detection run every `2 × POLL_INTERVAL` (30s by default), after an immediate startup sync |
-| `SESSION_TTL` | no | `12h` |
-| `SLACK_ENABLED` | no | `false` |
-| `SLACK_WEBHOOK_URL` | when enabled | HTTPS Slack incoming webhook |
-| `LISTEN_ADDR` | no | `:8080` |
-| `TRUSTED_PROXY` | no | Comma-separated proxy CIDRs that may assert HTTPS and forwarded host |
-
-Create credentials without putting the cleartext password in shell history:
+Use `pnpm build` to compile the frontend and `dist/hilink-sms`. Run the quality checks with:
 
 ```sh
-htpasswd -bnBC 12 '' 'choose-a-password' | cut -d: -f2
+pnpm lint && pnpm fmt:check && pnpm typecheck && pnpm test && pnpm build
 ```
 
-The application generates a cryptographically random session-signing secret in memory at startup. Sessions are invalidated whenever the server restarts. Login cookies are signed, HttpOnly, SameSite Strict, and use the Secure attribute for direct TLS or HTTPS asserted by a configured trusted proxy.
-
-## Docker deployment
-
-Set the required environment values in the deployment environment, then run:
-
-```sh
-docker compose up -d --build
-```
-
-The sample Compose file binds only to loopback. Put it behind an HTTPS reverse proxy and set `TRUSTED_PROXY` to that proxy's source CIDR. The application serves HTTP internally. Forwarded headers are ignored from untrusted peers. It has no persistent volumes and runs non-root with a read-only root filesystem and dropped capabilities.
-
-## HiLink compatibility
-
-The client uses the legacy HiLink session token, login, device information, SMS list, read-state, and delete XML endpoints. It expects numeric SMS indices and the common `SesTokInfo`/`__RequestVerificationToken` flow. Login, read-state updates, and repeated SMS retrieval were verified against an E8372 running Web UI `17.100.19.00.1217` on 2026-11-16, retrieving nine messages. HiLink exposes marking a message read through `api/sms/set-read`, but does not expose an inverse operation to restore unread state, so the UI follows the modem's reported `Smstat` value. Deletion and the E353/E3131 remain unverified; the modem's firmware is authoritative. Do not treat mocked or unit-level protocol checks as proof of hardware compatibility.
-
-On this E8372 Web UI, the modem password field has a 15-character limit. Pasting a longer password silently truncates it before hashing, so a successful browser login does not prove that the full pasted value is the modem password. Set `HILINK_PASSWORD` to the actual value accepted by that field. The client deliberately uses the configured password unchanged because other firmware may allow longer values. Error `108006` means the modem rejected the credentials; repeated attempts can produce lockout error `108007`. Stop retries and check the browser field's limit before investigating RSA or token handling. After changing `.env.dev`, restart `pnpm dev` so the backend receives the new environment; Air's source reload does not reload that file.
-
-SMS stays in the modem and in process memory only. Polling failures keep the last good snapshot. At startup, the current message set becomes the baseline and is not forwarded. Forwarding is best-effort and does not retry durably. SMS bodies and secrets are not logged.
-
-## Security and limitations
-
-Application authentication is separate from modem authentication. The service exposes no registration or send-SMS function. It uses a restrictive CSP, same-origin checks for state changes, request-size limits, login throttling, and no-store API responses. Slack requests have a bounded timeout and redirects disabled. A numeric six digit string can still be misidentified as an OTP. Network signal details are not yet exposed because modem support is not verified.
-
-The frontend theme preference is stored locally in the browser. There is no database, durable notification queue, settings interface, or persistent SMS cache.
+Browser tests: `pnpm test:e2e`.

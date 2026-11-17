@@ -1,6 +1,6 @@
 services:
   hilink-sms:
-    build: .
+    build: ..
     image: hilink-sms-manager:local
     restart: unless-stopped
     read_only: true

@@ -25,20 +25,23 @@ type storageStatusProvider interface {
 }
 
 type Forwarder struct {
-	enabled bool
-	webhook string
-	client  *http.Client
+	enabled     bool
+	webhook     string
+	client      *http.Client
+	addressBook map[string]string
 }
 
 func NewForwarder(enabled bool, webhook string) *Forwarder {
-	return &Forwarder{enabled, webhook, &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	return &Forwarder{enabled: enabled, webhook: webhook, client: &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 }
+
+func (f *Forwarder) SetAddressBook(book map[string]string) { f.addressBook = book }
 
 func (f *Forwarder) Send(ctx context.Context, m sms.Message) error {
 	if !f.enabled {
 		return nil
 	}
-	payload := map[string]string{"text": "New SMS from " + m.Sender + " at " + m.ReceivedAt.Format(time.RFC3339) + "\n" + m.Text}
+	payload := slackPayload(withContactName(m, f.addressBook))
 	b, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.webhook, bytes.NewReader(b))
 	if err != nil {
