@@ -1,10 +1,10 @@
-# HiLink SMS Manager
+# HiLink SMS Inbox
 
-A self-hosted web inbox for SMS received by a Huawei HiLink modem. Read and search messages, copy detected verification codes, and delete SMS from the modem. Optionally forward new messages to Slack.
+A self-hosted web inbox for SMS received by a Huawei [HiLink](https://developer.huawei.com/consumer/cn/doc/3090501) modem. Read and search messages, copy detected verification codes, inspect sender reputation, and delete SMS from the modem. Optionally forward new messages to Slack.
 
-![HiLink SMS Manager inbox in dark mode](doc/screenshot-darkmode.webp)
+![HiLink SMS Inbox in dark mode](doc/screenshot-darkmode.webp)
 
-The app runs in a single container with no database. Messages stay on the modem; the app keeps an in-memory copy. It cannot send SMS.
+The app runs in a single container with no database. Using Go, this requires > 15 MB RAM and hardly any CPU. Messages stay on the modem; the app keeps an in-memory copy. It cannot send SMS.
 
 ## Run with Docker Compose
 

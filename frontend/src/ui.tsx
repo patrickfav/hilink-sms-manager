@@ -225,9 +225,9 @@ export function App() {
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
   const visibleMessages = filtered.slice(page * pageSize, (page + 1) * pageSize)
   const deviceLabel =
-    [status?.deviceName, status?.hardwareVersion].filter(Boolean).join(' · ') || 'HiLink device'
+    [status?.deviceName, status?.hardwareVersion].filter(Boolean).join(' · ') || 'HiLink modem'
   useEffect(() => {
-    document.title = unreadCount > 0 ? `HiLink SMS (${unreadCount})` : 'HiLink SMS'
+    document.title = unreadCount > 0 ? `HiLink SMS Inbox (${unreadCount})` : 'HiLink SMS Inbox'
   }, [unreadCount])
   useEffect(() => {
     setPage((currentPage) => Math.min(currentPage, pageCount - 1))
@@ -384,7 +384,7 @@ export function App() {
               <MessageSquare size={16} />
             </span>
             <span>
-              HiLink<span class="brand-light"> / Inbox</span>
+              HiLink SMS<span class="brand-light"> Inbox</span>
               {status?.phoneNumber && <span class="brand-phone"> · {status.phoneNumber}</span>}
             </span>
           </div>
