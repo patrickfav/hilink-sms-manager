@@ -364,13 +364,18 @@ input:focus-visible {
   background: var(--bg);
 }
 .search input {
-  width: 100%;
+  width: auto;
+  flex: 1;
   min-width: 0;
   border: 0;
   outline: 0;
   background: transparent;
   color: var(--text);
   font-size: 11px;
+}
+.search input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
 }
 .search input:focus-visible {
   outline: 0;
@@ -381,6 +386,7 @@ input:focus-visible {
   color: var(--muted);
   padding: 2px;
   display: grid;
+  flex: none;
 }
 .list-total {
   font-size: 10px;
@@ -742,12 +748,19 @@ input:focus-visible {
   margin: 0 0 6px;
 }
 .footer {
-  height: 55px;
+  min-height: 70px;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: center;
+  padding: 18px 16px;
+  text-align: center;
   color: var(--muted);
   font-size: 10px;
+  opacity: 0.72;
+}
+.footer-disclaimer {
+  line-height: 1.4;
+  max-width: 760px;
 }
 .footer > span:first-child {
   display: flex;
@@ -1072,10 +1085,9 @@ input:focus-visible {
     font-size: 16px;
   }
   .footer {
+    min-height: 64px;
+    padding: 16px 10px;
     font-size: 9px;
-  }
-  .footer > span:last-child {
-    display: none;
   }
   .list-toolbar {
     padding: 0 11px;
