@@ -1,9 +1,10 @@
 import type { ComponentChildren } from 'preact'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
   Check,
   ChevronLeft,
   Copy,
+  ExternalLink,
   Inbox,
   LogOut,
   MessageSquare,
@@ -17,6 +18,8 @@ import {
   X,
 } from 'lucide-preact'
 import { api, type SMS, type Status } from './api'
+import modemIcon from './modem.svg'
+import slackIcon from './slack.svg'
 
 export function detectOTP(text: string) {
   const patterns = [
@@ -37,6 +40,25 @@ function timeLabel(raw: string) {
     timeStyle: 'short',
     hourCycle: 'h23',
   }).format(date)
+}
+function pathMessageId() {
+  const match = window.location.pathname.match(/^\/sms\/([^/?#]+)\/?$/)
+  if (!match) return null
+  try {
+    return decodeURIComponent(match[1])
+  } catch {
+    return null
+  }
+}
+function setMessagePath(id: string | null) {
+  const url = new URL(window.location.href)
+  url.pathname = id ? `/sms/${encodeURIComponent(id)}` : '/'
+  url.hash = ''
+  window.history.replaceState(null, '', url)
+}
+function tellowsURL(number: string) {
+  const normalized = number.replace(/\D/g, '')
+  return normalized ? `https://www.tellows.com/num/${normalized}` : ''
 }
 function avatarLetter(name: string) {
   return name.trim().slice(0, 1).toUpperCase()
@@ -177,6 +199,8 @@ export function App() {
   const [items, setItems] = useState<SMS[]>([])
   const [status, setStatus] = useState<Status | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
+  const [deepLinkId, setDeepLinkId] = useState<string | null>(() => pathMessageId())
+  const markingRead = useRef(new Set<string>())
   const [query, setQuery] = useState('')
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
@@ -216,6 +240,11 @@ export function App() {
       .session()
       .then((s) => setAuth(s.authenticated))
       .catch(() => setAuth(false))
+  }, [])
+  useEffect(() => {
+    const onPathChange = () => setDeepLinkId(pathMessageId())
+    window.addEventListener('popstate', onPathChange)
+    return () => window.removeEventListener('popstate', onPathChange)
   }, [])
   useEffect(() => {
     if (!authenticated) return
@@ -268,6 +297,8 @@ export function App() {
       await api.delete(current.id)
       setItems((prev) => prev.filter((m) => m.id !== current.id))
       setSelected(null)
+      setMessagePath(null)
+      setDeepLinkId(null)
       setConfirm(false)
       notice('Message deleted')
     } catch (e) {
@@ -290,7 +321,10 @@ export function App() {
   }
   async function selectMessage(message: SMS) {
     setSelected(message.id)
-    if (message.read) return
+    setMessagePath(message.id)
+    setDeepLinkId(message.id)
+    if (message.read || markingRead.current.has(message.id)) return
+    markingRead.current.add(message.id)
     try {
       await api.markRead(message.id)
       setItems((prev) =>
@@ -298,14 +332,23 @@ export function App() {
       )
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unable to mark message as read')
+    } finally {
+      markingRead.current.delete(message.id)
     }
   }
+  useEffect(() => {
+    if (!authenticated || !deepLinkId) return
+    const message = items.find((item) => item.id === deepLinkId)
+    if (message) void selectMessage(message)
+  }, [authenticated, deepLinkId, items])
   async function signOut() {
     setSignOutConfirm(false)
     await api.logout().catch(() => {})
     setAuth(false)
     setItems([])
     setSelected(null)
+    setMessagePath(null)
+    setDeepLinkId(null)
   }
   async function reboot() {
     setRebooting(true)
@@ -354,14 +397,25 @@ export function App() {
                 onClick={() => setDeviceInfoOpen(true)}
               >
                 <span class="dot green" />
+                <span class="status-icon modem-icon" style={`--status-icon: url("${modemIcon}")`} aria-hidden="true" />
                 <span>Modem connected</span>
               </button>
             ) : (
               <div class="connection">
                 <span class={`dot ${status?.connected ? 'green' : 'gray'}`} />
+                <span class="status-icon modem-icon" style={`--status-icon: url("${modemIcon}")`} aria-hidden="true" />
                 <span>Connecting to modem</span>
               </div>
             )}
+            <span
+              class="connection slack-connection"
+              title={status?.slackEnabled ? 'Slack notifications enabled' : 'Slack notifications disabled'}
+              aria-label={status?.slackEnabled ? 'Slack notifications enabled' : 'Slack notifications disabled'}
+            >
+              <span class={`dot ${status?.slackEnabled ? 'green' : 'gray'}`} />
+              <span class="status-icon slack-icon" style={`--status-icon: url("${slackIcon}")`} aria-hidden="true" />
+              <span>Slack {status?.slackEnabled ? 'enabled' : 'disabled'}</span>
+            </span>
             <span class="top-divider" />
             <ThemeToggle />
             <button
@@ -390,7 +444,7 @@ export function App() {
               <p class="muted">Messages received on your modem appear here.</p>
               {status?.lastSync && !status.error && !error && !status.storageFull && (
                 <span class="sync-inline">
-                  <span class="dot green" /> Last synced {timeLabel(status.lastSync)}
+                  Last synced {timeLabel(status.lastSync)}
                 </span>
               )}
             </div>
@@ -559,7 +613,11 @@ export function App() {
                     type="button"
                     class="icon-button back"
                     aria-label="Back to inbox"
-                    onClick={() => setSelected(null)}
+                    onClick={() => {
+                      setSelected(null)
+                      setMessagePath(null)
+                      setDeepLinkId(null)
+                    }}
                   >
                     <ChevronLeft size={18} />
                   </button>
@@ -574,13 +632,31 @@ export function App() {
                   </button>
                 </div>
                 <div class="detail-body">
-                  <h2>{current.senderName || current.sender || 'Unknown sender'}</h2>
-                  {current.senderName && <p class="sender-number">{current.sender}</p>}
+                  <div class="detail-title-row">
+                    <h2>{current.senderName || current.sender || 'Unknown sender'}</h2>
+                    {tellowsURL(current.sender) && (
+                      <a
+                        class="sender-lookup"
+                        href={tellowsURL(current.sender)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Check this number on tellows"
+                      >
+                        <ExternalLink size={14} />
+                        <span>Check number</span>
+                      </a>
+                    )}
+                  </div>
+                  {current.senderName && (
+                    <a class="sender-number" href={`tel:${current.sender.replace(/[^\d+]/g, '')}`}>
+                      {current.sender}
+                    </a>
+                  )}
                   <p class="detail-date">Received {timeLabel(current.receivedAt)}</p>
                   <div class="message-text">
-                    <span>{linkifyText(current.text)}</span>
-                    <span class="char-count">{current.text.length} characters</span>
+                    {linkifyText(current.text)}
                   </div>
+                  <div class="char-count">{current.text.length} characters</div>
                   {detectOTP(current.text) && (
                     <div class="code-card">
                       <div>

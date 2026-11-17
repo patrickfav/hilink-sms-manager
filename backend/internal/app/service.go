@@ -29,6 +29,8 @@ type Forwarder struct {
 	webhook     string
 	client      *http.Client
 	addressBook map[string]string
+	receiverNumber string
+	publicURL   string
 }
 
 func NewForwarder(enabled bool, webhook string) *Forwarder {
@@ -37,11 +39,15 @@ func NewForwarder(enabled bool, webhook string) *Forwarder {
 
 func (f *Forwarder) SetAddressBook(book map[string]string) { f.addressBook = book }
 
+func (f *Forwarder) SetReceiverNumber(number string) { f.receiverNumber = number }
+
+func (f *Forwarder) SetPublicURL(publicURL string) { f.publicURL = publicURL }
+
 func (f *Forwarder) Send(ctx context.Context, m sms.Message) error {
 	if !f.enabled {
 		return nil
 	}
-	payload := slackPayload(withContactName(m, f.addressBook))
+	payload := slackPayloadForReceiver(withContactName(m, f.addressBook), f.receiverNumber, f.publicURL)
 	b, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, f.webhook, bytes.NewReader(b))
 	if err != nil {
@@ -115,6 +121,7 @@ func (s *Service) poll(ctx context.Context, initial bool) {
 		if provider, ok := s.modem.(deviceInfoProvider); ok {
 			if info, infoErr := provider.DeviceInfo(ctx); infoErr == nil {
 				s.store.SetDeviceInfo(info)
+				s.forwarder.SetReceiverNumber(info.PhoneNumber)
 			} else {
 				s.logger.Debug("modem device information unavailable", "error", infoErr)
 			}

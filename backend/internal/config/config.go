@@ -17,7 +17,7 @@ import (
 type Config struct {
 	HiLinkURL, HiLinkUsername, HiLinkPassword     string
 	AuthUsername, AuthPasswordHash, SessionSecret string
-	ListenAddr, SlackWebhook                      string
+	ListenAddr, SlackWebhook, PublicURL           string
 	AddressBook                                   map[string]string
 	SlackEnabled                                  bool
 	PollInterval, SessionTTL                      time.Duration
@@ -29,7 +29,7 @@ func Load() (Config, error) {
 		HiLinkURL:      env("HILINK_URL", "http://192.168.8.1"),
 		HiLinkUsername: os.Getenv("HILINK_USERNAME"), HiLinkPassword: os.Getenv("HILINK_PASSWORD"),
 		AuthUsername: os.Getenv("AUTH_USERNAME"), AuthPasswordHash: os.Getenv("AUTH_PASSWORD_HASH"),
-		ListenAddr: env("LISTEN_ADDR", ":8080"), SlackWebhook: os.Getenv("SLACK_WEBHOOK_URL"), TrustedProxy: os.Getenv("TRUSTED_PROXY"),
+		ListenAddr: env("LISTEN_ADDR", ":8080"), SlackWebhook: os.Getenv("SLACK_WEBHOOK_URL"), PublicURL: env("PUBLIC_URL", "https://sms.favho.me"), TrustedProxy: os.Getenv("TRUSTED_PROXY"),
 		PollInterval: 15 * time.Second, SessionTTL: 12 * time.Hour,
 	}
 	var err error
@@ -74,6 +74,10 @@ func Load() (Config, error) {
 	u, err := url.Parse(c.HiLinkURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
 		return c, errors.New("HILINK_URL must be an http(s) URL without embedded credentials")
+	}
+	publicURL, err := url.Parse(c.PublicURL)
+	if err != nil || (publicURL.Scheme != "http" && publicURL.Scheme != "https") || publicURL.Host == "" || publicURL.User != nil || publicURL.RawQuery != "" || publicURL.Fragment != "" {
+		return c, errors.New("PUBLIC_URL must be an http(s) URL without credentials, query, or fragment")
 	}
 	if c.SlackEnabled {
 		su, err := url.Parse(c.SlackWebhook)

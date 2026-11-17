@@ -138,6 +138,7 @@ type Status struct {
 	LANMACAddress   string     `json:"lanMacAddress,omitempty"`
 	WANIPAddress    string     `json:"wanIpAddress,omitempty"`
 	StorageFull     bool       `json:"storageFull,omitempty"`
+	SlackEnabled    bool       `json:"slackEnabled"`
 }
 
 func (s *Store) Status() Status {

@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -62,8 +63,34 @@ func NewHTTP(c config.Config, s *sms.Store, m deleter, static fs.FS, l *slog.Log
 	mux.HandleFunc("/api/sms/", h.protect(h.message))
 	mux.HandleFunc("/api/device/reboot", h.protect(h.reboot))
 	mux.HandleFunc("/api/status", h.protect(h.status))
-	mux.Handle("/", http.FileServer(http.FS(static)))
+	fileServer := http.FileServer(http.FS(static))
+	serveIndex := func(w http.ResponseWriter) {
+		index, err := fs.ReadFile(static, "index.html")
+		if err != nil {
+			http.Error(w, "Not Found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(index)
+	}
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assetPath := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if assetPath == "" {
+			assetPath = "index.html"
+		}
+		if _, err := fs.Stat(static, assetPath); err != nil {
+			serveIndex(w)
+			return
+		}
+		fileServer.ServeHTTP(w, r)
+	}))
 	return h.secureHeaders(h.accessLog(mux))
+}
+
+func (h *HTTP) statusSnapshot() sms.Status {
+	status := h.store.Status()
+	status.SlackEnabled = h.cfg.SlackEnabled
+	return status
 }
 
 type accessLogWriter struct {
@@ -252,7 +279,7 @@ func (h *HTTP) messages(w http.ResponseWriter, r *http.Request) {
 	for i := range messages {
 		messages[i] = h.withContactName(messages[i])
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"messages": messages, "status": h.store.Status()})
+	writeJSON(w, http.StatusOK, map[string]any{"messages": messages, "status": h.statusSnapshot()})
 }
 func (h *HTTP) withContactName(message sms.Message) sms.Message {
 	return withContactName(message, h.cfg.AddressBook)
@@ -346,7 +373,7 @@ func (h *HTTP) status(w http.ResponseWriter, r *http.Request) {
 		method(w, http.MethodGet)
 		return
 	}
-	writeJSON(w, http.StatusOK, h.store.Status())
+	writeJSON(w, http.StatusOK, h.statusSnapshot())
 }
 func (h *HTTP) reboot(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

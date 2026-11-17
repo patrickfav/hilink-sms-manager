@@ -134,6 +134,18 @@ input:focus-visible {
   background: var(--soft);
   color: var(--text);
 }
+.status-icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  display: inline-block;
+  background: currentColor;
+  -webkit-mask: var(--status-icon) center / contain no-repeat;
+  mask: var(--status-icon) center / contain no-repeat;
+}
+.slack-connection {
+  white-space: nowrap;
+}
 .dot {
   width: 7px;
   height: 7px;
@@ -190,7 +202,7 @@ input:focus-visible {
 }
 .page-heading h1,
 .login-card h1 {
-  font-size: 28px;
+  font-size: 30px;
   line-height: 1.2;
   letter-spacing: -0.035em;
   margin: 0 0 8px;
@@ -502,7 +514,7 @@ input:focus-visible {
   align-items: center;
 }
 .row-head strong {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 650;
 }
 .row-head time {
@@ -512,7 +524,7 @@ input:focus-visible {
 }
 .preview {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.5;
   overflow: hidden;
   display: -webkit-box;
@@ -570,6 +582,11 @@ input:focus-visible {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  position: sticky;
+  top: 24px;
+  align-self: start;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
 }
 .detail-header {
   height: 60px;
@@ -601,19 +618,44 @@ input:focus-visible {
   margin: 0 auto;
 }
 .detail-body h2 {
-  font-size: 19px;
-  margin: 0 0 5px;
+  font-size: 22px;
+  margin: 0;
   letter-spacing: -0.025em;
+}
+.detail-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.sender-lookup {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 5px 8px;
+  font-size: 10px;
+  text-decoration: none;
+}
+.sender-lookup:hover {
+  color: var(--text);
+  background: var(--soft);
 }
 .sender-number {
   color: var(--muted);
   font-size: 11px;
-  margin: -1px 0 5px;
+  line-height: 1.15;
+  display: block;
+  text-decoration: none;
+  margin: -1px 0 1px;
 }
 .detail-date {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
-  margin: 0 0 27px;
+  margin: 10px 0 27px;
 }
 .message-text {
   white-space: pre-wrap;
@@ -624,16 +666,16 @@ input:focus-visible {
   background: var(--soft);
   border: 1px solid var(--border);
   border-radius: 9px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  margin-bottom: 4px;
 }
 .char-count {
-  align-self: flex-end;
+  display: block;
+  text-align: right;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1;
   opacity: 0.6;
+  margin: 0 4px 0 0;
 }
 .code-card {
   margin-top: 16px;
@@ -937,7 +979,15 @@ input:focus-visible {
   }
   .connection {
     font-size: 0;
-    gap: 0;
+    gap: 8px;
+  }
+  .slack-connection {
+    display: inline-flex;
+    gap: 8px;
+    font-size: 10px;
+  }
+  .slack-connection > span:last-child {
+    display: none;
   }
   .connection .dot {
     width: 8px;
@@ -951,7 +1001,7 @@ input:focus-visible {
     align-items: center;
   }
   .page-heading h1 {
-    font-size: 24px;
+    font-size: 26px;
   }
   .page-heading .muted {
     max-width: 230px;
@@ -960,16 +1010,27 @@ input:focus-visible {
   }
   .refresh {
     font-size: 0;
-    padding: 9px;
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
   }
   .refresh-control {
-    min-width: 34px;
+    min-width: 36px;
   }
   .refresh-control .refresh {
-    width: 34px;
+    width: 36px;
   }
   .refresh svg {
+    display: block;
     margin: 0;
+  }
+  .refresh-progress {
+    display: none;
   }
   .sync-note {
     margin-bottom: 10px;
@@ -979,8 +1040,14 @@ input:focus-visible {
     min-height: 410px;
     grid-template-columns: 1fr;
   }
+  .list-pane {
+    border-right: 0;
+  }
   .detail-pane {
     display: none;
+    position: static;
+    max-height: none;
+    overflow: visible;
   }
   .inbox-panel.has-detail .list-pane {
     display: none;
@@ -998,6 +1065,9 @@ input:focus-visible {
   .detail-body {
     padding: 28px 23px;
   }
+  .message-text {
+    font-size: 16px;
+  }
   .footer {
     font-size: 9px;
   }
@@ -1009,7 +1079,14 @@ input:focus-visible {
     gap: 8px;
   }
   .message-row {
-    padding: 14px 27px 14px 11px;
+    padding: 15px 27px 15px 11px;
+  }
+  .row-head strong {
+    font-size: 15px;
+  }
+  .preview {
+    font-size: 14px;
+    line-height: 1.6;
   }
   .sender-avatar {
     width: 31px;

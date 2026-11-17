@@ -21,6 +21,7 @@ export type Status = {
   lanMacAddress?: string
   wanIpAddress?: string
   storageFull?: boolean
+  slackEnabled: boolean
 }
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {

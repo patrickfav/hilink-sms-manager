@@ -39,6 +39,14 @@ func TestUnauthenticatedAPIAndSecurityHeaders(t *testing.T) {
 	}
 }
 
+func TestSPARoutesServeIndex(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	testHandler(t).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/sms/123", nil))
+	if recorder.Code != http.StatusOK || recorder.Body.String() != "ok" {
+		t.Fatalf("SPA route response = %d %q, want 200 index", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestLoginCSRFLogoutAndInvalidation(t *testing.T) {
 	handler := testHandler(t)
 	request := func(path, origin string, body []byte) *httptest.ResponseRecorder {

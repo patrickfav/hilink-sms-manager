@@ -8,17 +8,26 @@ import (
 )
 
 func TestSlackPayloadFormatsSenderCodeAndSafeLinks(t *testing.T) {
-	payload := slackPayload(sms.Message{
+	payload := slackPayloadForReceiver(sms.Message{
+		ID:         "123",
 		Sender:     "+43 660 123456",
 		SenderName: "Alex",
 		Text:       "Your security code is 482913. Visit https://example.test/login.",
 		ReceivedAt: time.Unix(1_700_000_000, 0),
-	})
-	if payload["text"] != "SMS from +43 660 123456 (Alex)\nReceived 2023-11-14T22:13:20Z\nYour security code is 482913. Visit https://example.test/login." {
+	}, "+43 660 999999", "https://sms.favho.me")
+	if payload["text"] != "SMS from +43 660 123456 (Alex)\nReceived 2023-11-14T22:13:20Z · +43 660 999999\nYour security code is 482913. Visit https://example.test/login." {
 		t.Fatalf("unexpected fallback text: %#v", payload["text"])
 	}
 	blocks := payload["blocks"].([]slackObject)
+	deepLink := blocks[3]["elements"].([]slackObject)[0]["text"]
+	if deepLink != "<https://sms.favho.me/sms/123|Open in HiLink SMS>" {
+		t.Fatalf("unexpected message deep link: %q", deepLink)
+	}
 	body := blocks[2]["elements"].([]slackObject)
+	received := blocks[1]["elements"].([]slackObject)[0]["text"].(string)
+	if received != "Received <!date^1700000000^{date_short_pretty} at {time}|2023-11-14T22:13:20Z> · +43 660 999999" {
+		t.Fatalf("unexpected received line: %q", received)
+	}
 	code := body[1]
 	if code["text"] != "482913" || code["style"].(slackObject)["code"] != true {
 		t.Fatalf("code was not highlighted: %#v", code)
