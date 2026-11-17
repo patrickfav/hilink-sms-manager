@@ -31,7 +31,7 @@ func slackPayloadForReceiver(m sms.Message, receiverNumber, publicURL string) sl
 	if m.SenderName != "" {
 		sender += " (" + m.SenderName + ")"
 	}
-	body, fallback, _ := slackBody(m.Text)
+	body, _, _ := slackBody(m.Text)
 	heading := slackText("SMS from " + sender)
 	heading["style"] = slackObject{"bold": true}
 	received := "unknown time"
@@ -42,10 +42,6 @@ func slackPayloadForReceiver(m sms.Message, receiverNumber, publicURL string) sl
 	}
 	if receiverNumber != "" {
 		receivedLine += " · " + receiverNumber
-	}
-	fallbackReceived := "Received " + received
-	if receiverNumber != "" {
-		fallbackReceived += " · " + receiverNumber
 	}
 	blocks := []slackObject{
 		{"type": "rich_text", "elements": []slackObject{{"type": "rich_text_section", "elements": []slackObject{heading}}}},
@@ -58,7 +54,31 @@ func slackPayloadForReceiver(m sms.Message, receiverNumber, publicURL string) sl
 		deepLink := strings.TrimRight(publicURL, "/") + "/sms/" + url.PathEscape(m.ID)
 		blocks = append(blocks, slackObject{"type": "context", "elements": []slackObject{{"type": "mrkdwn", "text": "<" + deepLink + "|Open in HiLink SMS>"}}})
 	}
-	return slackObject{"text": "SMS from " + sender + "\n" + fallbackReceived + "\n" + fallback, "blocks": blocks, "unfurl_links": false, "unfurl_media": false}
+	return slackObject{"text": slackNotificationText(sender, m.Text), "blocks": blocks, "unfurl_links": false, "unfurl_media": false}
+}
+
+func slackNotificationText(sender, body string) string {
+	if code := slackNotificationCode(body); code != "" {
+		return "SMS from " + sender + " · verification code " + code
+	}
+	excerpt := strings.Join(strings.Fields(body), " ")
+	runes := []rune(excerpt)
+	if len(runes) > 120 {
+		excerpt = string(runes[:117]) + "…"
+	}
+	if excerpt == "" {
+		return "SMS from " + sender
+	}
+	return "SMS from " + sender + " · " + excerpt
+}
+
+func slackNotificationCode(body string) string {
+	for _, pattern := range slackCodes {
+		if hit := pattern.FindStringSubmatch(body); hit != nil {
+			return strings.ReplaceAll(hit[1], " ", "")
+		}
+	}
+	return ""
 }
 
 // Tokenize links first so digits inside URLs, email addresses and phone numbers

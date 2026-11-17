@@ -14,13 +14,13 @@ func TestSlackPayloadFormatsSenderCodeAndSafeLinks(t *testing.T) {
 		SenderName: "Alex",
 		Text:       "Your security code is 482913. Visit https://example.test/login.",
 		ReceivedAt: time.Unix(1_700_000_000, 0),
-	}, "+43 660 999999", "https://sms.favho.me")
-	if payload["text"] != "SMS from +43 660 123456 (Alex)\nReceived 2023-11-14T22:13:20Z · +43 660 999999\nYour security code is 482913. Visit https://example.test/login." {
+	}, "+43 660 999999", "https://sms.example.test")
+	if payload["text"] != "SMS from +43 660 123456 (Alex) · verification code 482913" {
 		t.Fatalf("unexpected fallback text: %#v", payload["text"])
 	}
 	blocks := payload["blocks"].([]slackObject)
 	deepLink := blocks[3]["elements"].([]slackObject)[0]["text"]
-	if deepLink != "<https://sms.favho.me/sms/123|Open in HiLink SMS>" {
+	if deepLink != "<https://sms.example.test/sms/123|Open in HiLink SMS>" {
 		t.Fatalf("unexpected message deep link: %q", deepLink)
 	}
 	quote := blocks[2]["elements"].([]slackObject)[0]

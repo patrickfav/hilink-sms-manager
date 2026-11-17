@@ -101,7 +101,7 @@ func TestPollingBaselinesAfterInitialFailureAndForwardsNewOnce(t *testing.T) {
 	service.poll(ctx, false)
 	select {
 	case got := <-deliveries:
-		if got == "" || got == "new code 654321" || !contains(got, "new code 654321") {
+		if got == "" || !contains(got, "654321") {
 			t.Fatalf("unexpected Slack payload: %q", got)
 		}
 	case <-time.After(time.Second):

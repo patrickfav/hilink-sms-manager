@@ -73,7 +73,7 @@ All settings use environment variables. The four credentials in the setup exampl
 | `SESSION_TTL` | `12h` | Web login session lifetime |
 | `SLACK_ENABLED` | `false` | Enable Slack forwarding |
 | `SLACK_WEBHOOK_URL` | — | Required when Slack is enabled |
-| `PUBLIC_URL` | `https://sms.favho.me` | Base URL for direct Slack links to individual messages |
+| `PUBLIC_URL` | - | Base URL for direct Slack links to individual messages |
 | `LISTEN_ADDR` | `:8080` | HTTP listen address |
 | `TRUSTED_PROXY` | — | Comma-separated proxy CIDRs allowed to assert HTTPS and forwarded host |
 
