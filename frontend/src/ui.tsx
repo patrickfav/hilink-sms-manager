@@ -301,6 +301,28 @@ export function App() {
     return () => window.removeEventListener('popstate', onPathChange)
   }, [])
   useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.key !== 'Escape' ||
+        !selected ||
+        confirm ||
+        signOutConfirm ||
+        deviceInfoOpen ||
+        slackInfoOpen ||
+        rebootConfirm
+      ) {
+        return
+      }
+      const target = event.target as HTMLElement | null
+      if (target?.matches('input, textarea, select, [contenteditable="true"]')) return
+      setSelected(null)
+      setMessagePath(null)
+      setDeepLinkId(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [selected, confirm, signOutConfirm, deviceInfoOpen, slackInfoOpen, rebootConfirm])
+  useEffect(() => {
     if (!authenticated) return
     let active = false
     let timer: number | undefined
@@ -708,6 +730,18 @@ export function App() {
                     <ChevronLeft size={18} />
                   </button>
                   <span class="detail-label">MESSAGE DETAILS</span>
+                  {tellowsURL(current.sender) && (
+                    <a
+                      class="sender-lookup"
+                      href={tellowsURL(current.sender)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="Check this number on tellows"
+                    >
+                      <ExternalLink size={14} />
+                      <span>Check number</span>
+                    </a>
+                  )}
                   <button
                     type="button"
                     class="icon-button danger-icon"
@@ -728,25 +762,19 @@ export function App() {
                         </a>
                       )}
                     </h2>
-                    {tellowsURL(current.sender) && (
-                      <a
-                        class="sender-lookup"
-                        href={tellowsURL(current.sender)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title="Check this number on tellows"
-                      >
-                        <ExternalLink size={14} />
-                        <span>Check number</span>
-                      </a>
-                    )}
+                    <time
+                      class="detail-date"
+                      dateTime={current.receivedAt}
+                      title={timeLabel(current.receivedAt)}
+                    >
+                      Received {timeLabel(current.receivedAt)}
+                    </time>
                   </div>
                   {current.senderName && (
                     <a class="sender-number" href={phoneURL(current.sender)}>
                       {current.sender}
                     </a>
                   )}
-                  <p class="detail-date">Received {timeLabel(current.receivedAt)}</p>
                   <div class="message-text">{linkifyText(current.text)}</div>
                   <div class="char-count">{current.text.length} characters</div>
                   {currentCode && (
