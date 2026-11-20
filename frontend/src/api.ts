@@ -5,6 +5,8 @@ export type SMS = {
   text: string
   receivedAt: string
   read: boolean
+  isOtp: boolean
+  otpCodes: string[]
 }
 export type SlackDelivery = {
   sentAt: string
@@ -51,7 +53,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new Error(message)
   }
-  if (response.status === 204) return undefined as T
+  if (response.status === 202 || response.status === 204) return undefined as T
   return response.json()
 }
 export const api = {

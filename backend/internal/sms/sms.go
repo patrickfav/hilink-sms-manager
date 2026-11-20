@@ -4,11 +4,20 @@ import (
 	"crypto/sha512"
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
+
+var otpPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\b(?:code|otp|verification|verify|security|login|sicherheitscode|aktivierungscode|verifizierungscode)\b\D{0,24}((?:\d[\s-]?){3,7}\d)\b`),
+	regexp.MustCompile(`(?i)\b(G-\d{6})\b`),
+	regexp.MustCompile(`(?i)\b(?:code|otp|verification|verify|security|login|sicherheitscode|aktivierungscode|verifizierungscode)\b\D{0,24}([A-Z0-9]{5})\b`),
+	regexp.MustCompile(`\b(\d{6})\b`),
+}
 
 type Message struct {
 	// ID is the stable, opaque identifier exposed by the HTTP API. ModemID and
@@ -21,6 +30,8 @@ type Message struct {
 	Text       string    `json:"text"`
 	ReceivedAt time.Time `json:"receivedAt"`
 	Read       bool      `json:"read"`
+	IsOTP      bool      `json:"isOtp"`
+	OTPCodes   []string  `json:"otpCodes"`
 }
 
 type DeviceInfo struct {
@@ -65,7 +76,61 @@ func Normalize(m Message) Message {
 	}
 	m.ModemID = modemID
 	m.ID = PublicID(modemID)
+	return ClassifyOTP(m)
+}
+
+// ExtractOTPCodes returns each distinct verification code found in message
+// text, preserving the order in which the matching patterns find them.
+func ExtractOTPCodes(text string) []string {
+	codes := []string{}
+	seen := make(map[string]struct{})
+	for _, pattern := range otpPatterns {
+		for _, match := range pattern.FindAllStringSubmatch(text, -1) {
+			if len(match) < 2 {
+				continue
+			}
+			code := normalizeOTPCode(match[1])
+			if code == "" {
+				continue
+			}
+			if _, exists := seen[code]; exists {
+				continue
+			}
+			seen[code] = struct{}{}
+			codes = append(codes, code)
+		}
+	}
+	return codes
+}
+
+// ClassifyOTP marks a message and stores all extracted OTP codes for API and
+// downstream notification consumers.
+func ClassifyOTP(m Message) Message {
+	m.OTPCodes = ExtractOTPCodes(m.Text)
+	m.IsOTP = len(m.OTPCodes) > 0
 	return m
+}
+
+func digitsOnly(value string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' {
+			return r
+		}
+		return -1
+	}, value)
+}
+
+func normalizeOTPCode(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) >= 2 && strings.EqualFold(value[:2], "g-") {
+		return "G-" + digitsOnly(value[2:])
+	}
+	if strings.IndexFunc(value, func(r rune) bool {
+		return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+	}) != -1 {
+		return strings.ToUpper(value)
+	}
+	return digitsOnly(value)
 }
 
 // Identity deliberately excludes mutable fields such as read status.
@@ -96,6 +161,9 @@ func NewStore() *Store { return &Store{} }
 
 func (s *Store) Replace(messages []Message) {
 	snapshot := append([]Message(nil), messages...)
+	for i := range snapshot {
+		snapshot[i] = ClassifyOTP(snapshot[i])
+	}
 	sort.Slice(snapshot, func(i, j int) bool { return snapshot[i].ReceivedAt.After(snapshot[j].ReceivedAt) })
 	s.mu.Lock()
 	s.messages = append([]Message{}, snapshot...)

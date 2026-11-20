@@ -6,6 +6,8 @@ const sms = {
   text: 'Your verification code is 482913.',
   receivedAt: '2026-11-14T12:00:00Z',
   read: false,
+  isOtp: true,
+  otpCodes: ['482913'],
 }
 
 test('login, inspect an OTP, and delete its SMS', async ({ page, context }) => {

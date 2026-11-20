@@ -744,7 +744,7 @@ input:focus-visible {
 }
 .detail-empty {
   margin: 0;
-  padding-top: 1em;
+  padding-top: 4.5em;
 }
 .detail-empty p {
   color: var(--text);
@@ -954,18 +954,17 @@ input:focus-visible {
 }
 .reboot-progress span {
   display: block;
-  width: 100%;
+  width: 38%;
   height: 100%;
-  transform-origin: left;
   background: var(--accent);
-  animation: reboot-progress 30s linear forwards;
+  animation: reboot-progress 1.2s ease-in-out infinite alternate;
 }
 @keyframes reboot-progress {
   from {
-    transform: scaleX(0);
+    transform: translateX(-100%);
   }
   to {
-    transform: scaleX(1);
+    transform: translateX(263%);
   }
 }
 .dialog {

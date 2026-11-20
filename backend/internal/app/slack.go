@@ -13,10 +13,6 @@ import (
 type slackObject = map[string]any
 
 var slackLinks = regexp.MustCompile(`(?i)https?://[^\s<>"']+|www\.[^\s<>"']+|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|\+\d[\d\s().-]{6,}\d`)
-var slackCodes = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)(?:code|otp|verification|verify|security|login|sicherheitscode|verifizierungscode)\D{0,24}((?:\d[ -]?){3,7}\d)\b`),
-	regexp.MustCompile(`\b(\d{6})\b`),
-}
 
 func slackText(text string) slackObject {
 	return slackObject{"type": "text", "text": text}
@@ -27,11 +23,12 @@ func formatSlackTimestamp(t time.Time) string {
 }
 
 func slackPayloadForReceiver(m sms.Message, receiverNumber, publicURL string) slackObject {
+	m = sms.ClassifyOTP(m)
 	sender := m.Sender
 	if m.SenderName != "" {
 		sender += " (" + m.SenderName + ")"
 	}
-	body, _, _ := slackBody(m.Text)
+	body, _, _ := slackBody(m.Text, m.OTPCodes)
 	heading := slackText("SMS from " + sender)
 	heading["style"] = slackObject{"bold": true}
 	received := "unknown time"
@@ -54,14 +51,14 @@ func slackPayloadForReceiver(m sms.Message, receiverNumber, publicURL string) sl
 		deepLink := strings.TrimRight(publicURL, "/") + "/sms/" + url.PathEscape(sms.Normalize(m).ID)
 		blocks = append(blocks, slackObject{"type": "context", "elements": []slackObject{{"type": "mrkdwn", "text": "<" + deepLink + "|Open in HiLink SMS>"}}})
 	}
-	return slackObject{"text": slackNotificationText(sender, m.Text), "blocks": blocks, "unfurl_links": false, "unfurl_media": false}
+	return slackObject{"text": slackNotificationText(sender, m), "blocks": blocks, "unfurl_links": false, "unfurl_media": false}
 }
 
-func slackNotificationText(sender, body string) string {
-	if code := slackNotificationCode(body); code != "" {
-		return "SMS from " + sender + " · verification code " + code
+func slackNotificationText(sender string, message sms.Message) string {
+	if message.IsOTP && len(message.OTPCodes) > 0 {
+		return "SMS from " + sender + " · verification code " + message.OTPCodes[0]
 	}
-	excerpt := strings.Join(strings.Fields(body), " ")
+	excerpt := strings.Join(strings.Fields(message.Text), " ")
 	runes := []rune(excerpt)
 	if len(runes) > 120 {
 		excerpt = string(runes[:117]) + "…"
@@ -72,18 +69,9 @@ func slackNotificationText(sender, body string) string {
 	return "SMS from " + sender + " · " + excerpt
 }
 
-func slackNotificationCode(body string) string {
-	for _, pattern := range slackCodes {
-		if hit := pattern.FindStringSubmatch(body); hit != nil {
-			return strings.ReplaceAll(hit[1], " ", "")
-		}
-	}
-	return ""
-}
-
 // Tokenize links first so digits inside URLs, email addresses and phone numbers
 // cannot be highlighted as verification codes.
-func slackBody(text string) ([]slackObject, string, bool) {
+func slackBody(text string, otpCodes []string) ([]slackObject, string, bool) {
 	links := slackLinks.FindAllStringIndex(text, -1)
 	masked := []byte(text)
 	for _, span := range links {
@@ -91,13 +79,7 @@ func slackBody(text string) ([]slackObject, string, bool) {
 			masked[i] = 'x'
 		}
 	}
-	codeStart, codeEnd := -1, -1
-	for _, pattern := range slackCodes {
-		if hit := pattern.FindStringSubmatchIndex(string(masked)); hit != nil {
-			codeStart, codeEnd = hit[2], hit[3]
-			break
-		}
-	}
+	codeStart, codeEnd := otpSpan(string(masked), otpCodes)
 	elements := []slackObject{}
 	var fallback strings.Builder
 	appendText := func(start, end int) {
@@ -146,4 +128,21 @@ func slackBody(text string) ([]slackObject, string, bool) {
 	}
 	appendText(cursor, len(text))
 	return elements, fallback.String(), hasWebLinks
+}
+
+func otpSpan(text string, codes []string) (int, int) {
+	for _, code := range codes {
+		if code == "" {
+			continue
+		}
+		parts := make([]string, 0, len(code))
+		for _, digit := range code {
+			parts = append(parts, regexp.QuoteMeta(string(digit)))
+		}
+		pattern := regexp.MustCompile(`\b` + strings.Join(parts, `[ -]?`) + `\b`)
+		if span := pattern.FindStringIndex(text); span != nil {
+			return span[0], span[1]
+		}
+	}
+	return -1, -1
 }

@@ -40,7 +40,7 @@ func TestSlackPayloadFormatsSenderCodeAndSafeLinks(t *testing.T) {
 }
 
 func TestSlackBodyDoesNotTreatPhoneDigitsAsCode(t *testing.T) {
-	body, _, _ := slackBody("Call +43 660 123456 for help")
+	body, _, _ := slackBody("Call +43 660 123456 for help", nil)
 	for _, element := range body {
 		if style, ok := element["style"].(slackObject); ok && style["code"] == true {
 			t.Fatalf("phone number was highlighted: %#v", body)

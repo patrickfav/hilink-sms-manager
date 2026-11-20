@@ -21,18 +21,6 @@ import { api, AuthenticationError, type SMS, type Status } from './api'
 import modemIcon from './modem.svg'
 import slackIcon from './slack.svg'
 
-export function detectOTP(text: string) {
-  const patterns = [
-    /(?:code|otp|verification|verify|security|login|sicherheitscode|verifizierungscode|verification\s+code)\D{0,24}((?:\d[\s-]?){3,7}\d)/i,
-    /(?:code|otp|verification|verify|security|login|sicherheitscode|verifizierungscode|verification\s+code)\D{0,24}(\d{4,8})/i,
-    /\b(\d{6})\b/,
-  ]
-  for (const pattern of patterns) {
-    const hit = text.match(pattern)
-    if (hit) return hit[1].replace(/\D/g, '')
-  }
-  return null
-}
 function timeLabel(raw: string) {
   const date = new Date(raw)
   if (Number.isNaN(date.getTime()) || date.getUTCFullYear() <= 1) return 'Unknown date'
@@ -252,7 +240,7 @@ export function App() {
   const refreshInterval = 10000
   const unreadCount = items.filter((message) => !message.read).length
   const current = items.find((m) => m.id === selected) || null
-  const currentCode = current ? detectOTP(current.text) : null
+  const currentCode = current?.isOtp ? current.otpCodes[0] || null : null
   const filtered = useMemo(
     () => items.filter((m) => `${m.sender} ${m.text}`.toLowerCase().includes(query.toLowerCase())),
     [items, query],
@@ -436,39 +424,41 @@ export function App() {
     setDeepLinkId(null)
   }
   async function reboot() {
+    setRebootConfirm(false)
+    setDeviceInfoOpen(false)
     setRebooting(true)
+    const recoveryStartedAt = Date.now()
+    const wait = (milliseconds: number) =>
+      new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds))
     try {
-      await api.reboot()
-      setRebootConfirm(false)
-      setDeviceInfoOpen(false)
+      try {
+        await api.reboot()
+      } catch (e) {
+        if (handleAuthenticationError(e)) return
+        setError(e instanceof Error ? e.message : 'Unable to reboot modem')
+      }
       setStatus((currentStatus) =>
         currentStatus
           ? { ...currentStatus, connected: false, error: 'Modem is rebooting.' }
           : currentStatus,
       )
-      const deadline = Date.now() + 30000
-      let restored = false
-      while (Date.now() < deadline) {
-        await new Promise<void>((resolve) => {
-          window.setTimeout(resolve, 5000)
-        })
+      await wait(Math.max(0, 35000 - (Date.now() - recoveryStartedAt)))
+      for (;;) {
         try {
           const data = await api.inbox()
           setItems(data.messages)
           setStatus(data.status)
           setError('')
-          restored = true
           break
         } catch (e) {
           if (handleAuthenticationError(e)) return
+          await wait(2000)
         }
       }
-      if (restored) notice('Modem back online')
-      else setError('The modem is still restarting. Try again in a moment.')
+      notice('Modem back online')
     } catch (e) {
-      if (!handleAuthenticationError(e)) {
-        setError(e instanceof Error ? e.message : 'Unable to reboot modem')
-      }
+      if (handleAuthenticationError(e)) return
+      setError(e instanceof Error ? e.message : 'Unable to recover modem connection')
     } finally {
       setRebooting(false)
     }
@@ -511,7 +501,7 @@ export function App() {
               </button>
             ) : (
               <div class="connection">
-                <span class={`dot ${status?.connected ? 'green' : 'gray'}`} />
+                <span class="dot amber" />
                 <span
                   class="status-icon modem-icon"
                   style={`--status-icon: url("${modemIcon}")`}
@@ -657,7 +647,7 @@ export function App() {
                 </div>
               ) : (
                 visibleMessages.map((m) => {
-                  const code = detectOTP(m.text)
+                  const code = m.isOtp ? m.otpCodes[0] || null : null
                   return (
                     <div
                       class={`message-row ${selected === m.id ? 'selected' : ''} ${m.read ? '' : 'unread'}`}
@@ -1038,7 +1028,7 @@ export function App() {
             </div>
             <h2 id="reboot-progress-title">Rebooting modem…</h2>
             <p id="reboot-progress-description">
-              The modem is restarting. This will take about 30 seconds.
+              The modem is restarting. We’ll return you to the inbox when it is back online.
             </p>
             <div class="reboot-progress" aria-hidden="true">
               <span />

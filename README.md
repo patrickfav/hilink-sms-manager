@@ -48,7 +48,7 @@ The supplied Compose file listens only on loopback. For remote access, put it be
 ## Using the inbox
 
 - Select a message to read it and mark it read on the modem. HiLink does not support marking it unread again.
-- Search by sender number or message text. Use the copy button for detected verification codes; detection can mistake other numbers for codes.
+- Search by sender number or message text. Use the copy button for verification codes classified by the backend.
 - Delete a message to **permanently remove it from the modem**, freeing SMS storage.
 - Switch between light and dark themes; your browser remembers the choice.
 
