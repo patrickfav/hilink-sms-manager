@@ -1,5 +1,6 @@
 export type SMS = {
   id: string
+  threadId: string
   sender: string
   senderName?: string
   text: string

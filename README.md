@@ -6,12 +6,13 @@ A self-hosted web inbox for SMS received by a Huawei [HiLink](https://developer.
 
 The app runs in a single container with no database. Using Go, this requires > 15 MB RAM and hardly any CPU. Messages stay on the modem; the app keeps an in-memory copy. It cannot send SMS.
 
-Message URLs and Slack deep links use stable 32-character identifiers derived
-from SHA-512 rather than the modem's raw SMS IDs or indexes. The modem values
-remain in memory only
-so read-state and deletion requests can target the correct message. These
-identifiers are opaque, not encryption; protect the inbox with HTTPS and the
-application login as described below.
+Message URLs and Slack deep links use the form
+`/sms/<thread-id>/<message-id>`. Both identifiers are stable, synthetic,
+20-character lowercase Base32 values derived from the first 12 bytes of
+SHA-512 rather than the modem's raw SMS IDs, indexes, or sender numbers. The
+modem values remain in memory only so read-state and deletion requests can
+target the correct message. These identifiers are opaque, not encryption;
+protect the inbox with HTTPS and the application login as described below.
 
 ## Run with Docker Compose
 
@@ -77,6 +78,7 @@ All settings use environment variables. The four credentials in the setup exampl
 | `HILINK_URL` | `http://192.168.8.1` | Modem address |
 | `HILINK_USERNAME` | — | Modem administrator username |
 | `HILINK_PASSWORD` | — | Modem administrator password |
+| `TZ` | `Europe/Vienna` | Timezone for modem timestamps without an explicit offset |
 | `AUTH_USERNAME` | — | Web login username |
 | `AUTH_PASSWORD_HASH` | — | bcrypt hash of the web login password |
 | `ADDRESS_BOOK` | — | Contact names, e.g. `+15550100:Alex\|+15550101:Sam` |

@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 
 const sms = {
   id: '6e2293394d5dc4e654afae3b517fa3ea',
+  threadId: 'thread-example',
   sender: '+43 660 1234567',
   text: 'Your verification code is 482913.',
   receivedAt: '2026-11-14T12:00:00Z',
@@ -43,9 +44,9 @@ test('login, inspect an OTP, and delete its SMS', async ({ page, context }) => {
 
   await expect(page.locator('.page-heading h1')).toContainText('Your inbox')
   await page.getByRole('button', { name: /\+43 660 1234567/ }).click()
-  await expect(page.locator('.message-text')).toHaveText('Your verification code is 482913.')
+  await expect(page.locator('.thread-message-text')).toHaveText('Your verification code is 482913.')
   await expect(page.getByText('482913', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Copy code' }).click()
+  await page.getByRole('button', { name: 'Copy verification code 482913' }).click()
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('482913')
 
   await page.getByRole('button', { name: 'Delete message' }).click()

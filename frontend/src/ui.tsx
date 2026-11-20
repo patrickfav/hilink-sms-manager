@@ -52,18 +52,30 @@ function relativeTimeLabel(raw: string) {
   }
   return 'just now'
 }
-function pathMessageId() {
-  const match = window.location.pathname.match(/^\/sms\/([^/?#]+)\/?$/)
+type DeepLink = {
+  threadId: string
+  messageId: string | null
+}
+function pathMessageRef(): DeepLink | null {
+  const match = window.location.pathname.match(/^\/sms\/([^/?#]+)(?:\/([^/?#]+))?\/?$/)
   if (!match) return null
   try {
-    return decodeURIComponent(match[1])
+    const first = decodeURIComponent(match[1])
+    return {
+      threadId: first,
+      messageId: match[2] ? decodeURIComponent(match[2]) : null,
+    }
   } catch {
     return null
   }
 }
-function setMessagePath(id: string | null) {
+function setMessagePath(ref: DeepLink | null) {
   const url = new URL(window.location.href)
-  url.pathname = id ? `/sms/${encodeURIComponent(id)}` : '/'
+  url.pathname = ref
+    ? ref.messageId
+      ? `/sms/${encodeURIComponent(ref.threadId)}/${encodeURIComponent(ref.messageId)}`
+      : `/sms/${encodeURIComponent(ref.threadId)}`
+    : '/'
   url.hash = ''
   window.history.replaceState(null, '', url)
 }
@@ -77,12 +89,70 @@ function phoneURL(number: string) {
   const normalized = number.trim().startsWith('+') ? `+${digits}` : digits
   return normalized ? `tel:${normalized}` : ''
 }
+type MessageThread = {
+  key: string
+  messages: SMS[]
+  latest: SMS
+  unreadCount: number
+}
+const maxMessagesPerThread = 150
+const maxThreads = 150
+function threadKey(message: SMS) {
+  if (message.threadId) return message.threadId
+  const digits = message.sender.replace(/\D/g, '')
+  return digits || message.sender.trim().toLocaleLowerCase()
+}
+function threadSeed(sender: string) {
+  const digits = sender.replace(/\D/g, '')
+  return digits || sender.trim().toLocaleLowerCase()
+}
+const crockfordAlphabet = '0123456789abcdefghjkmnpqrstvwxyz'
+function base32(bytes: Uint8Array) {
+  let buffer = 0
+  let bits = 0
+  let output = ''
+  for (const byte of bytes) {
+    buffer = (buffer << 8) | byte
+    bits += 8
+    while (bits >= 5) {
+      bits -= 5
+      output += crockfordAlphabet[(buffer >>> bits) & 31]
+    }
+    buffer &= bits === 0 ? 0 : (1 << bits) - 1
+  }
+  if (bits > 0) output += crockfordAlphabet[(buffer << (5 - bits)) & 31]
+  return output
+}
+async function syntheticThreadID(sender: string) {
+  const input = new TextEncoder().encode(`hilink-sms-thread:v2\0${threadSeed(sender)}`)
+  const digest = await crypto.subtle.digest('SHA-512', input)
+  return base32(new Uint8Array(digest).slice(0, 12))
+}
+function calendarDateKey(raw: string) {
+  const date = new Date(raw)
+  if (Number.isNaN(date.getTime())) return raw
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
+}
+function calendarDateLabel(raw: string) {
+  const date = new Date(raw)
+  if (Number.isNaN(date.getTime())) return 'Unknown date'
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(date)
+}
 function avatarLetter(name: string) {
   return name.trim().slice(0, 1).toUpperCase()
 }
-function linkifyText(text: string): ComponentChildren {
-  const tokenPattern =
-    /(https?:\/\/[^\s<>"']+|www\.[^\s<>"']+|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|(?:\+\d[\d\s().-]{6,}\d))/gi
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+function linkifyText(text: string, codes: string[] = []): ComponentChildren {
+  const tokenSources = [
+    `https?://[^\\s<>"']+`,
+    `www\\.[^\\s<>"']+`,
+    `[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}`,
+    `(?:\\+\\d[\\d\\s().-]{6,}\\d)`,
+    ...codes.map(escapeRegExp),
+  ]
+  const tokenPattern = new RegExp(`(${tokenSources.join('|')})`, 'gi')
   const parts: ComponentChildren[] = []
   let cursor = 0
   let match: RegExpExecArray | null
@@ -90,6 +160,18 @@ function linkifyText(text: string): ComponentChildren {
     const rawToken = match[0]
     const trailing = rawToken.match(/[.,!?;:)\]}]+$/)?.[0] || ''
     const visibleToken = trailing ? rawToken.slice(0, -trailing.length) : rawToken
+    const isDetectedCode = codes.some((code) => code.toLowerCase() === visibleToken.toLowerCase())
+    if (isDetectedCode) {
+      if (match.index > cursor) parts.push(text.slice(cursor, match.index))
+      parts.push(
+        <code class="message-code" key={`code-${match.index}`}>
+          {visibleToken}
+        </code>,
+      )
+      if (trailing) parts.push(trailing)
+      cursor = match.index + rawToken.length
+      continue
+    }
     const isWebUrl = /^(?:https?:\/\/|www\.)/i.test(visibleToken)
     const isEmail = visibleToken.includes('@')
     const href = isWebUrl
@@ -114,6 +196,67 @@ function linkifyText(text: string): ComponentChildren {
   }
   if (cursor < text.length) parts.push(text.slice(cursor))
   return parts
+}
+function VerificationCodeWidget({
+  code,
+  onCopy,
+  label = 'Verification code:',
+}: {
+  code: string
+  onCopy: (code: string) => void
+  label?: string
+}) {
+  return (
+    <span class="otp-tag verification-code-widget">
+      <span class="verification-code-label">{label}</span>
+      <strong>{code}</strong>
+      <button
+        type="button"
+        class="copy-code-link"
+        aria-label={`Copy code ${code}`}
+        onClick={(event) => {
+          event.stopPropagation()
+          onCopy(code)
+        }}
+      >
+        <Copy size={13} aria-hidden="true" />
+      </button>
+    </span>
+  )
+}
+function useScrollShadows(dependency: number) {
+  const ref = useRef<HTMLElement | null>(null)
+  const [position, setPosition] = useState({ top: false, bottom: false })
+  useEffect(() => {
+    const element = ref.current
+    if (!element) return
+    const update = () => {
+      setPosition({
+        top: element.scrollTop > 1,
+        bottom: element.scrollTop + element.clientHeight < element.scrollHeight - 1,
+      })
+    }
+    update()
+    element.addEventListener('scroll', update, { passive: true })
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update)
+    observer?.observe(element)
+    return () => {
+      element.removeEventListener('scroll', update)
+      observer?.disconnect()
+    }
+  }, [dependency])
+  const className = [
+    position.top ? 'has-scroll-shadow-top' : '',
+    position.bottom ? 'has-scroll-shadow-bottom' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+  return {
+    ref: (element: HTMLElement | null) => {
+      ref.current = element
+    },
+    className,
+  }
 }
 function ThemeToggle() {
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'system')
@@ -220,8 +363,9 @@ export function App() {
   const [items, setItems] = useState<SMS[]>([])
   const [status, setStatus] = useState<Status | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
-  const [deepLinkId, setDeepLinkId] = useState<string | null>(() => pathMessageId())
+  const [deepLink, setDeepLink] = useState<DeepLink | null>(() => pathMessageRef())
   const markingRead = useRef(new Set<string>())
+  const messageRefs = useRef(new Map<string, HTMLElement>())
   const [query, setQuery] = useState('')
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
@@ -232,33 +376,61 @@ export function App() {
   const [slackInfoOpen, setSlackInfoOpen] = useState(false)
   const [rebootConfirm, setRebootConfirm] = useState(false)
   const [rebooting, setRebooting] = useState(false)
-  const [page, setPage] = useState(0)
   const [refreshCount, setRefreshCount] = useState(0)
   const [refreshing, setRefreshing] = useState(false)
   const [refreshCycle, setRefreshCycle] = useState(0)
-  const pageSize = 15
   const refreshInterval = 10000
   const unreadCount = items.filter((message) => !message.read).length
   const current = items.find((m) => m.id === selected) || null
-  const currentCode = current?.isOtp ? current.otpCodes[0] || null : null
-  const filtered = useMemo(
-    () => items.filter((m) => `${m.sender} ${m.text}`.toLowerCase().includes(query.toLowerCase())),
-    [items, query],
-  )
-  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
-  const visibleMessages = filtered.slice(page * pageSize, (page + 1) * pageSize)
+  const threads = useMemo(() => {
+    const grouped = new Map<string, SMS[]>()
+    for (const message of items) {
+      const key = threadKey(message)
+      const messages = grouped.get(key) || []
+      messages.push(message)
+      grouped.set(key, messages)
+    }
+    return [...grouped.entries()]
+      .map(([key, messages]): MessageThread => {
+        const sorted = messages
+          .slice()
+          .sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
+        const limited = sorted.slice(0, maxMessagesPerThread)
+        return {
+          key,
+          messages: limited,
+          latest: limited[0],
+          unreadCount: limited.filter((message) => !message.read).length,
+        }
+      })
+      .sort(
+        (a, b) => {
+          const dateDifference =
+            new Date(b.latest.receivedAt).getTime() - new Date(a.latest.receivedAt).getTime()
+          if (dateDifference !== 0) return dateDifference
+          return a.key.localeCompare(b.key)
+        },
+      )
+      .slice(0, maxThreads)
+  }, [items])
+  const currentThread = current ? threads.find((thread) => thread.key === threadKey(current)) : null
+  const threadMessages = currentThread?.messages || []
+  const filteredThreads = useMemo(() => {
+    const search = query.toLowerCase()
+    return threads.filter((thread) =>
+      thread.messages.some((message) =>
+        `${message.sender} ${message.senderName || ''} ${message.text}`.toLowerCase().includes(search),
+      ),
+    )
+  }, [threads, query])
+  const listScrollShadows = useScrollShadows(filteredThreads.length)
+  const detailScrollShadows = useScrollShadows(threadMessages.length)
   const slackDeliveries = status?.slackDeliveries ?? []
   const deviceLabel =
     [status?.deviceName, status?.hardwareVersion].filter(Boolean).join(' · ') || 'HiLink modem'
   useEffect(() => {
     document.title = unreadCount > 0 ? `HiLink SMS Inbox (${unreadCount})` : 'HiLink SMS Inbox'
   }, [unreadCount])
-  useEffect(() => {
-    setPage((currentPage) => Math.min(currentPage, pageCount - 1))
-  }, [pageCount])
-  useEffect(() => {
-    setPage(0)
-  }, [query])
   function handleAuthenticationError(err: unknown) {
     if (!(err instanceof AuthenticationError)) return false
     setAuthError(err.message)
@@ -268,7 +440,7 @@ export function App() {
     setSelected(null)
     setSlackInfoOpen(false)
     setMessagePath(null)
-    setDeepLinkId(null)
+    setDeepLink(null)
     setError('')
     return true
   }
@@ -284,7 +456,7 @@ export function App() {
       })
   }, [])
   useEffect(() => {
-    const onPathChange = () => setDeepLinkId(pathMessageId())
+    const onPathChange = () => setDeepLink(pathMessageRef())
     window.addEventListener('popstate', onPathChange)
     return () => window.removeEventListener('popstate', onPathChange)
   }, [])
@@ -306,7 +478,7 @@ export function App() {
       if (target?.matches('input, textarea, select, [contenteditable="true"]')) return
       setSelected(null)
       setMessagePath(null)
-      setDeepLinkId(null)
+      setDeepLink(null)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -365,7 +537,7 @@ export function App() {
       setItems((prev) => prev.filter((m) => m.id !== current.id))
       setSelected(null)
       setMessagePath(null)
-      setDeepLinkId(null)
+      setDeepLink(null)
       setConfirm(false)
       notice('Message deleted')
     } catch (e) {
@@ -388,10 +560,14 @@ export function App() {
       notice('Clipboard access unavailable')
     }
   }
-  async function selectMessage(message: SMS) {
+  async function selectMessage(message: SMS, updatePath = true) {
     setSelected(message.id)
-    setMessagePath(message.id)
-    setDeepLinkId(message.id)
+    if (updatePath) {
+      const threadId = message.threadId || (await syntheticThreadID(message.sender))
+      const ref = { threadId, messageId: message.id }
+      setMessagePath(ref)
+      setDeepLink(ref)
+    }
     if (message.read || markingRead.current.has(message.id)) return
     markingRead.current.add(message.id)
     try {
@@ -408,10 +584,23 @@ export function App() {
     }
   }
   useEffect(() => {
-    if (!authenticated || !deepLinkId) return
-    const message = items.find((item) => item.id === deepLinkId)
-    if (message) void selectMessage(message)
-  }, [authenticated, deepLinkId, items])
+    if (!authenticated || !deepLink) return
+    if (deepLink.messageId) {
+      const message = items.find((item) => item.id === deepLink.messageId)
+      if (message) void selectMessage(message)
+      return
+    }
+    const thread = threads.find((candidate) => candidate.key === deepLink.threadId)
+    if (thread) void selectMessage(thread.latest, false)
+  }, [authenticated, deepLink?.messageId, deepLink?.threadId, items, threads])
+  useEffect(() => {
+    if (!deepLink?.messageId || !current) return
+    const messageElement = messageRefs.current.get(current.id)
+    if (!messageElement) return
+    window.requestAnimationFrame(() => {
+      messageElement.scrollIntoView({ block: 'center', behavior: 'auto' })
+    })
+  }, [deepLink?.messageId, current?.id, threadMessages.length])
   async function signOut() {
     setSignOutConfirm(false)
     await api.logout().catch(() => {})
@@ -421,7 +610,7 @@ export function App() {
     setSelected(null)
     setSlackInfoOpen(false)
     setMessagePath(null)
-    setDeepLinkId(null)
+    setDeepLink(null)
   }
   async function reboot() {
     setRebootConfirm(false)
@@ -548,42 +737,45 @@ export function App() {
         </header>
         <div class="page-heading">
           <div class="heading-copy">
-            <p class="eyebrow">MESSAGES</p>
-            <h1>
-              Your inbox <span class="count">{items.length}</span>
-              {unreadCount > 0 && (
-                <span class="unread-count">
-                  <span class="unread-mark" /> {unreadCount} unread
-                </span>
-              )}
-            </h1>
-            <div class="heading-subline">
-              <p class="muted">Messages received on your modem appear here.</p>
-              {status?.lastSync && !status.error && !error && !status.storageFull && (
-                <span class="sync-inline">Last synced {timeLabel(status.lastSync)}</span>
-              )}
+            <p class="eyebrow">THREADS</p>
+            <div class="heading-title-row">
+              <h1>
+                Your inbox <span class="count">{items.length}</span>
+                {unreadCount > 0 && (
+                  <span class="unread-count">
+                    <span class="unread-mark" /> {unreadCount} unread
+                  </span>
+                )}
+              </h1>
             </div>
           </div>
-          <div class="refresh-control">
-            <button
-              type="button"
-              class="secondary refresh"
-              disabled={refreshing}
-              onClick={() => {
-                setRefreshCycle((cycle) => cycle + 1)
-                setRefreshCount((n) => n + 1)
-              }}
-            >
-              <RefreshCw class={refreshing ? 'refresh-spinning' : ''} size={16} />
-              {refreshing ? 'Refreshing…' : 'Refresh'}
-              <div class="refresh-progress" aria-hidden="true">
-                <span
-                  class="refresh-progress-fill"
-                  key={refreshCycle}
-                  style={{ animationDuration: `${refreshInterval}ms` }}
-                />
-              </div>
-            </button>
+          <div class="heading-side">
+            <div class="refresh-control">
+              <button
+                type="button"
+                class={`secondary refresh ${refreshing ? 'is-refreshing' : ''}`}
+                disabled={refreshing}
+                onClick={() => {
+                  setRefreshCycle((cycle) => cycle + 1)
+                  setRefreshCount((n) => n + 1)
+                }}
+              >
+                <div class="refresh-progress" aria-hidden="true">
+                  <span
+                    class="refresh-progress-fill"
+                    key={refreshCycle}
+                      style={refreshing ? undefined : { animationDuration: `${refreshInterval}ms` }}
+                  />
+                </div>
+                <span class="refresh-content">
+                  <RefreshCw class={refreshing ? 'refresh-spinning' : ''} size={16} />
+                  {refreshing ? 'Refreshing…' : 'Refresh'}
+                </span>
+              </button>
+            </div>
+            {status?.lastSync && !status.error && !error && !status.storageFull && (
+              <span class="sync-inline">Last synced {timeLabel(status.lastSync)}</span>
+            )}
           </div>
         </div>
         {(error || status?.error || status?.storageFull || !status?.lastSync) && (
@@ -629,100 +821,74 @@ export function App() {
                 )}
               </div>
               <span class="list-total">
-                {filtered.length} {filtered.length === 1 ? 'message' : 'messages'}
+                {filteredThreads.length} {filteredThreads.length === 1 ? 'sender' : 'senders'}
               </span>
             </div>
-            <div class="message-list">
-              {filtered.length === 0 ? (
-                <div class="empty">
-                  <div class="empty-icon">
-                    <Inbox size={22} />
+            <div class={`scroll-shadow-frame message-scroll-frame ${listScrollShadows.className}`}>
+              <div ref={listScrollShadows.ref} class="message-list">
+                {filteredThreads.length === 0 ? (
+                  <div class="empty">
+                    <div class="empty-icon">
+                      <Inbox size={22} />
+                    </div>
+                    <h2>{items.length ? 'No results found' : 'Your inbox is clear'}</h2>
+                    <p>
+                      {items.length
+                        ? 'Try another sender or keyword.'
+                        : 'New text messages will show up here.'}
+                    </p>
                   </div>
-                  <h2>{items.length ? 'No results found' : 'Your inbox is clear'}</h2>
-                  <p>
-                    {items.length
-                      ? 'Try another sender or keyword.'
-                      : 'New text messages will show up here.'}
-                  </p>
-                </div>
-              ) : (
-                visibleMessages.map((m) => {
-                  const code = m.isOtp ? m.otpCodes[0] || null : null
+                ) : (
+                  filteredThreads.map((thread) => {
+                  const latest = thread.latest
+                  const sender = latest.senderName || latest.sender || 'Unknown sender'
+                  const latestCode = latest.isOtp ? latest.otpCodes[0] || null : null
                   return (
                     <div
-                      class={`message-row ${selected === m.id ? 'selected' : ''} ${m.read ? '' : 'unread'}`}
-                      key={m.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => void selectMessage(m)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault()
-                          void selectMessage(m)
-                        }
-                      }}
+                      class={`message-row thread-row ${currentThread?.key === thread.key ? 'selected' : ''} ${thread.unreadCount ? 'unread' : ''}`}
+                      key={thread.key}
                     >
-                      <span class="sender-avatar">
-                        {m.senderName ? avatarLetter(m.senderName) : <Phone size={16} />}
-                      </span>
-                      <span class="row-content">
-                        <span class="row-head">
-                          <strong>{m.senderName || m.sender || 'Unknown sender'}</strong>
-                          <time dateTime={m.receivedAt} title={timeLabel(m.receivedAt)}>
-                            {relativeTimeLabel(m.receivedAt)}
-                          </time>
+                      <button
+                        type="button"
+                        class="thread-row-main"
+                        aria-label={`${sender}, ${thread.messages.length} ${thread.messages.length === 1 ? 'message' : 'messages'}, last message ${relativeTimeLabel(latest.receivedAt)}`}
+                        onClick={() => void selectMessage(latest)}
+                      >
+                        <span class="sender-avatar">
+                          {latest.senderName ? avatarLetter(latest.senderName) : <Phone size={16} />}
                         </span>
-                        <span class="preview">{linkifyText(m.text)}</span>
-                        {code && (
-                          <span class="otp-tag">
-                            <span>
-                              Code detected: <strong>{code}</strong>
-                            </span>
-                            <button
-                              type="button"
-                              class="copy-code-link"
-                              aria-label={`Copy code ${code}`}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                void copy(code)
-                              }}
-                              onKeyDown={(e) => e.stopPropagation()}
-                            >
-                              <Copy size={13} aria-hidden="true" />
-                            </button>
+                        <span class="row-content">
+                          <span class="row-head">
+                            <strong>{sender}</strong>
+                            <time dateTime={latest.receivedAt} title={timeLabel(latest.receivedAt)}>
+                              {relativeTimeLabel(latest.receivedAt)}
+                            </time>
                           </span>
+                          <span class="preview">{latest.text}</span>
+                        </span>
+                      </button>
+                      <div class="thread-row-footer">
+                        {latestCode && (
+                          <VerificationCodeWidget
+                            code={latestCode}
+                            label="Code:"
+                            onCopy={(value) => void copy(value)}
+                          />
                         )}
-                      </span>
+                        <span class="thread-row-meta">
+                          {thread.messages.length} {thread.messages.length === 1 ? 'message' : 'messages'}
+                          {thread.unreadCount > 0 && ` · ${thread.unreadCount} unread`}
+                        </span>
+                      </div>
                     </div>
                   )
-                })
-              )}
+                  })
+                )}
+              </div>
             </div>
-            {filtered.length > pageSize && (
-              <nav class="pagination" aria-label="Message pages">
-                <button
-                  type="button"
-                  class="secondary pagination-button"
-                  disabled={page === 0}
-                  onClick={() => setPage((currentPage) => Math.max(0, currentPage - 1))}
-                >
-                  Previous
-                </button>
-                <span>
-                  Page {page + 1} of {pageCount}
-                </span>
-                <button
-                  type="button"
-                  class="secondary pagination-button"
-                  disabled={page === pageCount - 1}
-                  onClick={() => setPage((currentPage) => Math.min(pageCount - 1, currentPage + 1))}
-                >
-                  Next
-                </button>
-              </nav>
-            )}
           </div>
-          <section class="detail-pane">
+          <div class="thread-scroll-frame">
+            <section class="detail-pane thread-pane">
             {current ? (
               <>
                 <div class="detail-header">
@@ -733,12 +899,12 @@ export function App() {
                     onClick={() => {
                       setSelected(null)
                       setMessagePath(null)
-                      setDeepLinkId(null)
+                      setDeepLink(null)
                     }}
                   >
                     <ChevronLeft size={18} />
                   </button>
-                  <span class="detail-label">MESSAGE DETAILS</span>
+                  <span class="detail-label">CONVERSATION</span>
                   {tellowsURL(current.sender) && (
                     <a
                       class="sender-lookup"
@@ -751,17 +917,13 @@ export function App() {
                       <span>Check number</span>
                     </a>
                   )}
-                  <button
-                    type="button"
-                    class="icon-button danger-icon"
-                    aria-label="Delete message"
-                    onClick={() => setConfirm(true)}
-                  >
-                    <Trash2 size={17} />
-                  </button>
                 </div>
-                <div class="detail-body">
-                  <div class="detail-title-row">
+                <div
+                  class={`scroll-shadow-frame thread-body-scroll-frame ${detailScrollShadows.className}`}
+                >
+                  <div ref={detailScrollShadows.ref} class="thread-body-scroll-content">
+                    <div class="detail-body">
+                  <div class="thread-heading">
                     <div class="detail-identity">
                       <h2>
                         {current.senderName || !phoneURL(current.sender) ? (
@@ -778,31 +940,86 @@ export function App() {
                         </a>
                       )}
                     </div>
-                    <time
-                      class="detail-date"
-                      dateTime={current.receivedAt}
-                      title={timeLabel(current.receivedAt)}
-                    >
-                      {timeLabel(current.receivedAt)}
-                    </time>
+                    <span class="thread-count">
+                      {currentThread?.messages.length || 0}{' '}
+                      {currentThread?.messages.length === 1 ? 'message' : 'messages'}
+                    </span>
                   </div>
-                  <div class="message-text">{linkifyText(current.text)}</div>
-                  <div class="char-count">{current.text.length} characters</div>
-                  {currentCode && (
-                    <div class="code-card">
-                      <div>
-                        <span class="eyebrow">VERIFICATION CODE</span>
-                        <strong>{currentCode}</strong>
-                      </div>
-                      <button
-                        type="button"
-                        class="secondary copy-button"
-                        onClick={() => void copy(currentCode)}
-                      >
-                        <Copy size={15} /> Copy code
-                      </button>
+                  <div class="thread-messages" aria-label="Messages in this thread">
+                    {threadMessages.map((message, index) => {
+                      const previous = threadMessages[index - 1]
+                      const showDate =
+                        !previous ||
+                        calendarDateKey(previous.receivedAt) !== calendarDateKey(message.receivedAt)
+                      const sender = message.senderName || message.sender || 'Unknown sender'
+                      return (
+                        <div
+                          class={`thread-entry ${showDate ? 'has-date-divider' : ''}`}
+                          key={message.id}
+                        >
+                          {showDate && (
+                            <div class="thread-date-divider">
+                              <time dateTime={message.receivedAt}>
+                                {calendarDateLabel(message.receivedAt)}
+                              </time>
+                            </div>
+                          )}
+                          <article
+                            id={`message-${message.id}`}
+                            ref={(element) => {
+                              if (element) messageRefs.current.set(message.id, element)
+                              else messageRefs.current.delete(message.id)
+                            }}
+                            class="thread-message"
+                          >
+                            <div class="thread-message-meta">
+                              <button
+                                type="button"
+                                class="thread-message-select"
+                                aria-pressed={message.id === current.id}
+                                aria-label={`Select message from ${sender}, ${timeLabel(message.receivedAt)}`}
+                                onClick={() => void selectMessage(message)}
+                              >
+                                <time dateTime={message.receivedAt} title={timeLabel(message.receivedAt)}>
+                                  {relativeTimeLabel(message.receivedAt)}
+                                </time>
+                              </button>
+                              <span class="thread-char-count">
+                                {message.text.length} {message.text.length === 1 ? 'character' : 'characters'}
+                              </span>
+                              <button
+                                type="button"
+                                class="thread-message-delete"
+                                aria-label={`Delete message from ${sender}, ${timeLabel(message.receivedAt)}`}
+                                onClick={() => {
+                                  setSelected(message.id)
+                                  setConfirm(true)
+                                }}
+                              >
+                                <Trash2 size={12} aria-hidden="true" />
+                              </button>
+                            </div>
+                            <div class="thread-message-text">
+                              {linkifyText(message.text, message.isOtp ? message.otpCodes : [])}
+                            </div>
+                            {message.isOtp && message.otpCodes.length > 0 && (
+                              <div class="thread-message-codes" aria-label="Verification codes">
+                                {message.otpCodes.map((code) => (
+                                  <VerificationCodeWidget
+                                    key={code}
+                                    code={code}
+                                    onCopy={(value) => void copy(value)}
+                                  />
+                                ))}
+                              </div>
+                            )}
+                          </article>
+                        </div>
+                      )
+                    })}
+                  </div>
                     </div>
-                  )}
+                  </div>
                 </div>
               </>
             ) : (
@@ -812,7 +1029,8 @@ export function App() {
                 <span>Choose a message from your inbox.</span>
               </div>
             )}
-          </section>
+            </section>
+          </div>
         </section>
         <footer class="footer">
           <span class="footer-disclaimer">

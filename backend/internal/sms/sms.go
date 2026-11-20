@@ -2,7 +2,7 @@ package sms
 
 import (
 	"crypto/sha512"
-	"encoding/hex"
+	"encoding/base32"
 	"fmt"
 	"regexp"
 	"sort"
@@ -15,19 +15,20 @@ import (
 var otpPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\b(?:code|otp|verification|verify|security|login|sicherheitscode|aktivierungscode|verifizierungscode)\b\D{0,24}((?:\d[\s-]?){3,7}\d)\b`),
 	regexp.MustCompile(`(?i)\b(G-\d{6})\b`),
-	regexp.MustCompile(`(?i)\b(?:code|otp|verification|verify|security|login|sicherheitscode|aktivierungscode|verifizierungscode)\b\D{0,24}([A-Z0-9]{5})\b`),
+	regexp.MustCompile(`(?i)\b(?:code|otp|verification|verify|security|login|sicherheitscode|aktivierungscode|verifizierungscode)\b\D{0,24}((?:\d[A-Z0-9]{4}|[A-Z0-9]\d[A-Z0-9]{3}|[A-Z0-9]{2}\d[A-Z0-9]{2}|[A-Z0-9]{3}\d[A-Z0-9]|[A-Z0-9]{4}\d))\b`),
 	regexp.MustCompile(`\b(\d{6})\b`),
 }
 
 type Message struct {
 	// ID is the stable, opaque identifier exposed by the HTTP API. ModemID and
 	// Index are kept for modem mutations and deliberately never serialized.
-	ID         string    `json:"id"`
-	ModemID    string    `json:"-"`
-	Index      int       `json:"-"`
-	Sender     string    `json:"sender"`
-	SenderName string    `json:"senderName,omitempty"`
-	Text       string    `json:"text"`
+	ID       string `json:"id"`
+	ThreadID string `json:"threadId"`
+	ModemID  string `json:"-"`
+	Index    int    `json:"-"`
+	Sender   string `json:"sender"`
+	SenderName string `json:"senderName,omitempty"`
+	Text       string `json:"text"`
 	ReceivedAt time.Time `json:"receivedAt"`
 	Read       bool      `json:"read"`
 	IsOTP      bool      `json:"isOtp"`
@@ -51,12 +52,36 @@ type StorageStatus struct {
 	Full       bool
 }
 
-// PublicID returns the first 32 hexadecimal characters of a versioned SHA-512
-// digest used in API paths and Slack deep links. A domain separator prevents
-// this value from being confused with hashes used for another purpose.
+const publicIDBytes = 12
+
+var idEncoding = base32.NewEncoding("0123456789abcdefghjkmnpqrstvwxyz").WithPadding(base32.NoPadding)
+
+// opaqueID returns a 20-character lowercase Base32 identifier from the first
+// 12 bytes of a versioned SHA-512 digest. The custom alphabet avoids ambiguous
+// characters while retaining 96 bits of digest material.
+func opaqueID(domain, value string) string {
+	sum := sha512.Sum512([]byte(domain + "\x00" + value))
+	return idEncoding.EncodeToString(sum[:publicIDBytes])
+}
+
+// PublicID returns a stable opaque Base32 identifier for a modem message.
 func PublicID(modemID string) string {
-	sum := sha512.Sum512([]byte("hilink-sms-message:v1\x00" + modemID))
-	return hex.EncodeToString(sum[:])[:32]
+	return opaqueID("hilink-sms-message:v3", modemID)
+}
+
+// ThreadID returns a stable synthetic identifier for all messages from the
+// same sender. Phone formatting is ignored so equivalent sender numbers share
+// a thread; non-numeric sender names are matched case-insensitively.
+func ThreadID(sender string) string {
+	return opaqueID("hilink-sms-thread:v2", threadKey(sender))
+}
+
+func threadKey(sender string) string {
+	digits := digitsOnly(sender)
+	if digits != "" {
+		return digits
+	}
+	return strings.ToLower(strings.TrimSpace(sender))
 }
 
 // Normalize assigns an opaque public ID while retaining the modem identifier
@@ -76,6 +101,7 @@ func Normalize(m Message) Message {
 	}
 	m.ModemID = modemID
 	m.ID = PublicID(modemID)
+	m.ThreadID = ThreadID(m.Sender)
 	return ClassifyOTP(m)
 }
 
@@ -162,6 +188,9 @@ func NewStore() *Store { return &Store{} }
 func (s *Store) Replace(messages []Message) {
 	snapshot := append([]Message(nil), messages...)
 	for i := range snapshot {
+		if snapshot[i].ThreadID == "" {
+			snapshot[i].ThreadID = ThreadID(snapshot[i].Sender)
+		}
 		snapshot[i] = ClassifyOTP(snapshot[i])
 	}
 	sort.Slice(snapshot, func(i, j int) bool { return snapshot[i].ReceivedAt.After(snapshot[j].ReceivedAt) })

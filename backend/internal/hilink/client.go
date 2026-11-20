@@ -376,12 +376,18 @@ func parseDate(s string) (time.Time, error) {
 		"2006-01-02T15:04:05.999999999Z07:00",
 		"2006-01-02 15:04:05-07:00",
 		"2006-01-02T15:04:05-07:00",
+	} {
+		if t, e := time.Parse(layout, s); e == nil {
+			return t, nil
+		}
+	}
+	for _, layout := range []string{
 		"2006-01-02 15:04:05.999999999",
 		"2006-01-02T15:04:05.999999999",
 		"2006-01-02 15:04:05",
 		"2006-01-02T15:04:05",
 	} {
-		if t, e := time.Parse(layout, s); e == nil {
+		if t, e := time.ParseInLocation(layout, s, time.Local); e == nil {
 			return t, nil
 		}
 	}

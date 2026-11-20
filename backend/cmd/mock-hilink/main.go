@@ -188,7 +188,7 @@ func (m *modem) listXML(w http.ResponseWriter, r *http.Request) {
 		}
 		response.Messages = append(response.Messages, xmlMessage{
 			Index: item.Index, Phone: item.Sender, Content: item.Text,
-			Date: item.ReceivedAt.UTC().Format("2006-01-02 15:04:05"), Smstat: read,
+			Date: item.ReceivedAt.In(time.Local).Format("2006-01-02 15:04:05"), Smstat: read,
 		})
 	}
 	w.Header().Set("Content-Type", "application/xml; charset=UTF-8")

@@ -16,7 +16,8 @@ import (
 
 func TestParseDate(t *testing.T) {
 	got, err := parseDate("2025-02-03 04:05:06")
-	if err != nil || got.Format(time.RFC3339) != "2025-02-03T04:05:06Z" {
+	want := time.Date(2025, 2, 3, 4, 5, 6, 0, time.Local)
+	if err != nil || !got.Equal(want) {
 		t.Fatalf("parseDate() = %v, %v", got, err)
 	}
 	if _, err := parseDate("not a date"); err == nil {
