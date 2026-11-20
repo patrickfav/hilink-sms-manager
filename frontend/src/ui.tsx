@@ -309,7 +309,8 @@ export function App() {
         signOutConfirm ||
         deviceInfoOpen ||
         slackInfoOpen ||
-        rebootConfirm
+        rebootConfirm ||
+        rebooting
       ) {
         return
       }
@@ -321,9 +322,9 @@ export function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [selected, confirm, signOutConfirm, deviceInfoOpen, slackInfoOpen, rebootConfirm])
+  }, [selected, confirm, signOutConfirm, deviceInfoOpen, slackInfoOpen, rebootConfirm, rebooting])
   useEffect(() => {
-    if (!authenticated) return
+    if (!authenticated || rebooting) return
     let active = false
     let timer: number | undefined
     const refresh = async () => {
@@ -367,7 +368,7 @@ export function App() {
       stopPolling()
       document.removeEventListener('visibilitychange', visible)
     }
-  }, [authenticated, refreshCount])
+  }, [authenticated, refreshCount, rebooting])
   async function remove() {
     if (!current) return
     setLoading(true)
@@ -445,7 +446,25 @@ export function App() {
           ? { ...currentStatus, connected: false, error: 'Modem is rebooting.' }
           : currentStatus,
       )
-      notice('Modem rebooting…')
+      const deadline = Date.now() + 30000
+      let restored = false
+      while (Date.now() < deadline) {
+        await new Promise<void>((resolve) => {
+          window.setTimeout(resolve, 5000)
+        })
+        try {
+          const data = await api.inbox()
+          setItems(data.messages)
+          setStatus(data.status)
+          setError('')
+          restored = true
+          break
+        } catch (e) {
+          if (handleAuthenticationError(e)) return
+        }
+      }
+      if (restored) notice('Modem back online')
+      else setError('The modem is still restarting. Try again in a moment.')
     } catch (e) {
       if (!handleAuthenticationError(e)) {
         setError(e instanceof Error ? e.message : 'Unable to reboot modem')
@@ -753,28 +772,30 @@ export function App() {
                 </div>
                 <div class="detail-body">
                   <div class="detail-title-row">
-                    <h2>
-                      {current.senderName || !phoneURL(current.sender) ? (
-                        current.senderName || current.sender || 'Unknown sender'
-                      ) : (
-                        <a class="sender-title-phone" href={phoneURL(current.sender)}>
+                    <div class="detail-identity">
+                      <h2>
+                        {current.senderName || !phoneURL(current.sender) ? (
+                          current.senderName || current.sender || 'Unknown sender'
+                        ) : (
+                          <a class="sender-title-phone" href={phoneURL(current.sender)}>
+                            {current.sender}
+                          </a>
+                        )}
+                      </h2>
+                      {current.senderName && (
+                        <a class="sender-number" href={phoneURL(current.sender)}>
                           {current.sender}
                         </a>
                       )}
-                    </h2>
+                    </div>
                     <time
                       class="detail-date"
                       dateTime={current.receivedAt}
                       title={timeLabel(current.receivedAt)}
                     >
-                      Received {timeLabel(current.receivedAt)}
+                      {timeLabel(current.receivedAt)}
                     </time>
                   </div>
-                  {current.senderName && (
-                    <a class="sender-number" href={phoneURL(current.sender)}>
-                      {current.sender}
-                    </a>
-                  )}
                   <div class="message-text">{linkifyText(current.text)}</div>
                   <div class="char-count">{current.text.length} characters</div>
                   {currentCode && (
@@ -1005,6 +1026,22 @@ export function App() {
               >
                 {rebooting ? 'Rebooting…' : 'Reboot'}
               </button>
+            </div>
+          </section>
+        </div>
+      )}
+      {rebooting && (
+        <div class="reboot-backdrop" role="alertdialog" aria-modal="true" aria-labelledby="reboot-progress-title" aria-describedby="reboot-progress-description">
+          <section class="reboot-dialog">
+            <div class="dialog-icon">
+              <RefreshCw class="refresh-spinning" size={19} />
+            </div>
+            <h2 id="reboot-progress-title">Rebooting modem…</h2>
+            <p id="reboot-progress-description">
+              The modem is restarting. This will take about 30 seconds.
+            </p>
+            <div class="reboot-progress" aria-hidden="true">
+              <span />
             </div>
           </section>
         </div>
