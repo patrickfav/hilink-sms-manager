@@ -972,25 +972,51 @@ input:focus-visible {
 }
 .thread-message-select {
   min-width: 0;
+  display: flex;
+  align-items: center;
+  flex: 1;
+}
+.thread-message-date {
   border: 0;
   padding: 0;
   background: transparent;
-  color: var(--text);
-  display: flex;
+  color: var(--muted);
+  display: inline-flex;
   align-items: center;
   text-align: left;
   cursor: pointer;
-  flex: 1;
 }
-.thread-message-select:focus-visible {
+.thread-message-date:focus-visible,
+.thread-message-link:focus-visible {
   outline: 2px solid #77a28688;
   outline-offset: 3px;
 }
-.thread-message-select time {
+.thread-message-date time {
   flex: none;
-  color: var(--muted);
   font-size: 11px;
   white-space: nowrap;
+}
+.thread-message-link {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 6px;
+  border-radius: 5px;
+  color: var(--muted);
+  opacity: 0;
+  transition:
+    opacity 0.16s ease,
+    color 0.16s ease,
+    background 0.16s ease;
+}
+.thread-message-select:hover .thread-message-link,
+.thread-message-link:focus-visible {
+  opacity: 1;
+}
+.thread-message-link:hover {
+  color: var(--accent);
+  background: var(--surface);
 }
 .unread-marker {
   width: 6px;
@@ -1007,6 +1033,17 @@ input:focus-visible {
   font-size: 11px;
   opacity: 0.6;
   white-space: nowrap;
+}
+.thread-message.selected {
+  background: color-mix(in srgb, var(--soft) 62%, var(--surface));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--accent) 52%, transparent),
+    inset 0 0 32px var(--selected-glow),
+    0 8px 20px #00000012;
+}
+.thread-message.selected .thread-message-date {
+  color: var(--accent);
+  font-weight: 650;
 }
 .thread-message-delete {
   flex: none;

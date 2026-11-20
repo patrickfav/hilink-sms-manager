@@ -6,6 +6,7 @@ import {
   Copy,
   ExternalLink,
   Inbox,
+  Link2,
   LogOut,
   MessageSquare,
   Moon,
@@ -279,6 +280,7 @@ export function App() {
   const [items, setItems] = useState<SMS[]>([])
   const [status, setStatus] = useState<Status | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
+  const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(null)
   const [seenUnreadIds, setSeenUnreadIds] = useState<Set<string>>(() => new Set())
   const [deepLink, setDeepLink] = useState<DeepLink | null>(() => pathMessageRef())
   const markingRead = useRef(new Set<string>())
@@ -328,7 +330,12 @@ export function App() {
       })
       .slice(0, maxThreads)
   }, [items])
-  const currentThread = current ? threads.find((thread) => thread.key === threadKey(current)) : null
+  const currentThread = selectedThreadKey
+    ? threads.find((thread) => thread.key === selectedThreadKey) || null
+    : current
+      ? threads.find((thread) => thread.key === threadKey(current)) || null
+      : null
+  const threadContact = currentThread?.latest || current
   const threadMessages = currentThread?.messages || []
   const filteredThreads = useMemo(() => {
     const search = query.toLowerCase()
@@ -355,6 +362,7 @@ export function App() {
     setItems([])
     setStatus(null)
     setSelected(null)
+    setSelectedThreadKey(null)
     setSeenUnreadIds(new Set())
     setSlackInfoOpen(false)
     setMessagePath(null)
@@ -394,9 +402,14 @@ export function App() {
       }
       const target = event.target as HTMLElement | null
       if (target?.matches('input, textarea, select, [contenteditable="true"]')) return
-      setSelected(null)
-      setMessagePath(null)
-      setDeepLink(null)
+      if (currentThread) {
+        void selectThread(currentThread)
+      } else {
+        setSelected(null)
+        setSelectedThreadKey(null)
+        setMessagePath(null)
+        setDeepLink(null)
+      }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -450,10 +463,13 @@ export function App() {
   async function remove() {
     if (!current) return
     const deletedThreadId = current.threadId || (await syntheticThreadID(current.sender))
+    const deletedThreadKey = threadKey(current)
     setLoading(true)
     try {
       await api.delete(current.id)
       setItems((prev) => prev.filter((m) => m.id !== current.id))
+      setSelectedThreadKey(deletedThreadKey)
+      setSelected(null)
       const threadRef = { threadId: deletedThreadId, messageId: null }
       setMessagePath(threadRef)
       setDeepLink(threadRef)
@@ -504,15 +520,27 @@ export function App() {
       }
     }
   }
+  async function selectThread(thread: MessageThread, updatePath = true) {
+    setSelectedThreadKey(thread.key)
+    setSelected(null)
+    if (updatePath) {
+      const threadId = thread.latest.threadId || (await syntheticThreadID(thread.latest.sender))
+      const ref = { threadId, messageId: null }
+      setMessagePath(ref)
+      setDeepLink(ref)
+    }
+    void markThreadRead(thread)
+  }
   async function selectMessage(message: SMS, updatePath = true) {
     setSelected(message.id)
+    const thread = threads.find((candidate) => candidate.key === threadKey(message))
+    if (thread) setSelectedThreadKey(thread.key)
     if (updatePath) {
       const threadId = message.threadId || (await syntheticThreadID(message.sender))
       const ref = { threadId, messageId: message.id }
       setMessagePath(ref)
       setDeepLink(ref)
     }
-    const thread = threads.find((candidate) => candidate.key === threadKey(message))
     if (thread) void markThreadRead(thread)
   }
   useEffect(() => {
@@ -523,7 +551,7 @@ export function App() {
       return
     }
     const thread = threads.find((candidate) => candidate.key === deepLink.threadId)
-    if (thread) void selectMessage(thread.latest, false)
+    if (thread) void selectThread(thread, false)
   }, [authenticated, deepLink?.messageId, deepLink?.threadId, items, threads])
   useEffect(() => {
     if (!deepLink?.messageId || !current) return
@@ -541,6 +569,7 @@ export function App() {
     setItems([])
     setSeenUnreadIds(new Set())
     setSelected(null)
+    setSelectedThreadKey(null)
     setSlackInfoOpen(false)
     setMessagePath(null)
     setDeepLink(null)
@@ -726,7 +755,7 @@ export function App() {
             </span>
           </div>
         )}
-        <section class={`inbox-panel ${current ? 'has-detail' : ''}`}>
+        <section class={`inbox-panel ${currentThread ? 'has-detail' : ''}`}>
           <div class="list-pane">
             <div class="list-toolbar">
               <div class="search">
@@ -778,14 +807,14 @@ export function App() {
                     const latestCode = latest.isOtp ? latest.otpCodes[0] || null : null
                     return (
                       <div
-                        class={`message-row thread-row ${currentThread?.key === thread.key ? 'selected' : ''} ${thread.unreadCount ? 'unread' : ''}`}
+                        class={`message-row thread-row ${selectedThreadKey === thread.key ? 'selected' : ''} ${thread.unreadCount ? 'unread' : ''}`}
                         key={thread.key}
                       >
                         <button
                           type="button"
                           class="thread-row-main"
                           aria-label={`${sender}, ${thread.messages.length} ${thread.messages.length === 1 ? 'message' : 'messages'}, last message ${relativeTimeLabel(latest.receivedAt)}`}
-                          onClick={() => void selectMessage(latest)}
+                          onClick={() => void selectThread(thread)}
                         >
                           <span class="sender-avatar">
                             {latest.senderName ? (
@@ -830,7 +859,7 @@ export function App() {
           </div>
           <div class="thread-scroll-frame">
             <section class="detail-pane thread-pane">
-              {current ? (
+              {currentThread ? (
                 <>
                   <div class="detail-header">
                     <button
@@ -839,6 +868,7 @@ export function App() {
                       aria-label="Back to inbox"
                       onClick={() => {
                         setSelected(null)
+                        setSelectedThreadKey(null)
                         setMessagePath(null)
                         setDeepLink(null)
                       }}
@@ -846,10 +876,10 @@ export function App() {
                       <ChevronLeft size={18} />
                     </button>
                     <span class="detail-label">CONVERSATION</span>
-                    {tellowsURL(current.sender) && (
+                    {threadContact && tellowsURL(threadContact.sender) && (
                       <a
                         class="sender-lookup"
-                        href={tellowsURL(current.sender)}
+                        href={tellowsURL(threadContact.sender)}
                         target="_blank"
                         rel="noopener noreferrer"
                         title="Check this number on tellows"
@@ -866,19 +896,28 @@ export function App() {
                       <div class="detail-body">
                         <div class="thread-heading">
                           <div class="detail-identity">
-                            <h2>
-                              {current.senderName || !phoneURL(current.sender) ? (
-                                current.senderName || current.sender || 'Unknown sender'
-                              ) : (
-                                <a class="sender-title-phone" href={phoneURL(current.sender)}>
-                                  {current.sender}
-                                </a>
-                              )}
-                            </h2>
-                            {current.senderName && (
-                              <a class="sender-number" href={phoneURL(current.sender)}>
-                                {current.sender}
-                              </a>
+                            {threadContact && (
+                              <>
+                                <h2>
+                                  {threadContact.senderName || !phoneURL(threadContact.sender) ? (
+                                    threadContact.senderName ||
+                                    threadContact.sender ||
+                                    'Unknown sender'
+                                  ) : (
+                                    <a
+                                      class="sender-title-phone"
+                                      href={phoneURL(threadContact.sender)}
+                                    >
+                                      {threadContact.sender}
+                                    </a>
+                                  )}
+                                </h2>
+                                {threadContact.senderName && (
+                                  <a class="sender-number" href={phoneURL(threadContact.sender)}>
+                                    {threadContact.sender}
+                                  </a>
+                                )}
+                              </>
                             )}
                           </div>
                           <span class="thread-count">
@@ -912,16 +951,10 @@ export function App() {
                                     if (element) messageRefs.current.set(message.id, element)
                                     else messageRefs.current.delete(message.id)
                                   }}
-                                  class="thread-message"
+                                  class={`thread-message ${message.id === selected ? 'selected' : ''}`}
                                 >
                                   <div class="thread-message-meta">
-                                    <button
-                                      type="button"
-                                      class="thread-message-select"
-                                      aria-pressed={message.id === current.id}
-                                      aria-label={`Select message from ${sender}, ${timeLabel(message.receivedAt)}`}
-                                      onClick={() => void selectMessage(message)}
-                                    >
+                                    <div class="thread-message-select">
                                       {seenUnreadIds.has(message.id) && (
                                         <span
                                           class="unread-marker"
@@ -929,13 +962,32 @@ export function App() {
                                           aria-hidden="true"
                                         />
                                       )}
-                                      <time
-                                        dateTime={message.receivedAt}
-                                        title={timeLabel(message.receivedAt)}
+                                      <button
+                                        type="button"
+                                        class="thread-message-date"
+                                        aria-pressed={message.id === selected}
+                                        aria-label={`Select message from ${sender}, ${timeLabel(message.receivedAt)}`}
+                                        onClick={() => void selectMessage(message)}
                                       >
-                                        {relativeTimeLabel(message.receivedAt)}
-                                      </time>
-                                    </button>
+                                        <time
+                                          dateTime={message.receivedAt}
+                                          title={timeLabel(message.receivedAt)}
+                                        >
+                                          {relativeTimeLabel(message.receivedAt)}
+                                        </time>
+                                      </button>
+                                      {message.threadId && (
+                                        <a
+                                          class="thread-message-link"
+                                          href={`/sms/${encodeURIComponent(message.threadId)}/${encodeURIComponent(message.id)}`}
+                                          aria-label="Open direct link to this message"
+                                          title="Open direct link to this message"
+                                          onClick={(event) => event.stopPropagation()}
+                                        >
+                                          <Link2 size={13} aria-hidden="true" />
+                                        </a>
+                                      )}
+                                    </div>
                                     <span class="thread-char-count">
                                       {message.text.length}{' '}
                                       {message.text.length === 1 ? 'character' : 'characters'}
