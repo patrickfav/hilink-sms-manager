@@ -25,6 +25,14 @@ type storageStatusProvider interface {
 	StorageStatus(context.Context) (sms.StorageStatus, error)
 }
 
+const maxSlackDeliveryHistory = 15
+
+type SlackDelivery struct {
+	SentAt     time.Time `json:"sentAt"`
+	Sender     string    `json:"sender"`
+	ReceivedAt time.Time `json:"receivedAt"`
+}
+
 type Forwarder struct {
 	enabled        bool
 	webhook        string
@@ -32,6 +40,8 @@ type Forwarder struct {
 	addressBook    map[string]string
 	receiverNumber string
 	publicURL      string
+	historyMu      sync.RWMutex
+	history        []SlackDelivery
 }
 
 func NewForwarder(enabled bool, webhook string) *Forwarder {
@@ -43,6 +53,28 @@ func (f *Forwarder) SetAddressBook(book map[string]string) { f.addressBook = boo
 func (f *Forwarder) SetReceiverNumber(number string) { f.receiverNumber = number }
 
 func (f *Forwarder) SetPublicURL(publicURL string) { f.publicURL = publicURL }
+
+func (f *Forwarder) SlackHistory() []SlackDelivery {
+	f.historyMu.RLock()
+	history := append([]SlackDelivery(nil), f.history...)
+	f.historyMu.RUnlock()
+	for left, right := 0, len(history)-1; left < right; left, right = left+1, right-1 {
+		history[left], history[right] = history[right], history[left]
+	}
+	if history == nil {
+		return []SlackDelivery{}
+	}
+	return history
+}
+
+func (f *Forwarder) recordSlackDelivery(m sms.Message) {
+	f.historyMu.Lock()
+	defer f.historyMu.Unlock()
+	f.history = append(f.history, SlackDelivery{SentAt: time.Now().UTC(), Sender: m.Sender, ReceivedAt: m.ReceivedAt})
+	if len(f.history) > maxSlackDeliveryHistory {
+		f.history = f.history[len(f.history)-maxSlackDeliveryHistory:]
+	}
+}
 
 func (f *Forwarder) Send(ctx context.Context, m sms.Message) error {
 	if !f.enabled {
@@ -64,6 +96,7 @@ func (f *Forwarder) Send(ctx context.Context, m sms.Message) error {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return &statusError{resp.StatusCode}
 	}
+	f.recordSlackDelivery(m)
 	return nil
 }
 
@@ -130,6 +163,9 @@ func (s *Service) poll(ctx context.Context, initial bool) {
 		s.store.Failure("Modem is unavailable; showing the last successful sync.")
 		s.logger.Warn("modem poll failed", "error", err)
 		return
+	}
+	for i := range messages {
+		messages[i] = sms.Normalize(messages[i])
 	}
 	s.mu.Lock()
 	needDeviceInfo := !s.deviceLoaded

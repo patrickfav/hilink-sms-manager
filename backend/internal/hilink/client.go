@@ -352,7 +352,7 @@ func (c *Client) List(ctx context.Context) ([]sms.Message, error) {
 				if err != nil {
 					t = time.Time{}
 				}
-				all = append(all, sms.Message{ID: id, Index: m.Index, Sender: m.Phone, Text: m.Content, ReceivedAt: t, Read: m.Smstat == "1"})
+				all = append(all, sms.Normalize(sms.Message{ModemID: id, Index: m.Index, Sender: m.Phone, Text: m.Content, ReceivedAt: t, Read: m.Smstat == "1"}))
 			}
 			if out.PageCount > 0 && page >= out.PageCount {
 				completed = true

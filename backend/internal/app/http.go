@@ -32,6 +32,9 @@ type reader interface {
 type rebooter interface {
 	Reboot(context.Context) error
 }
+type slackHistoryProvider interface {
+	SlackHistory() []SlackDelivery
+}
 type HTTP struct {
 	cfg      config.Config
 	store    *sms.Store
@@ -39,6 +42,7 @@ type HTTP struct {
 	static   fs.FS
 	logger   *slog.Logger
 	trusted  []*net.IPNet
+	slack   slackHistoryProvider
 	mu       sync.Mutex
 	attempts map[string]loginAttempt
 	revoked  map[string]int64
@@ -56,8 +60,12 @@ const (
 	maxLoginPrincipals = 10000
 )
 
-func NewHTTP(c config.Config, s *sms.Store, m deleter, static fs.FS, l *slog.Logger) http.Handler {
-	h := &HTTP{cfg: c, store: s, modem: m, static: static, logger: l, attempts: map[string]loginAttempt{}, revoked: map[string]int64{}}
+func NewHTTP(c config.Config, s *sms.Store, m deleter, static fs.FS, l *slog.Logger, history ...slackHistoryProvider) http.Handler {
+	var slack slackHistoryProvider
+	if len(history) > 0 {
+		slack = history[0]
+	}
+	h := &HTTP{cfg: c, store: s, modem: m, static: static, logger: l, slack: slack, attempts: map[string]loginAttempt{}, revoked: map[string]int64{}}
 	for _, part := range strings.Split(c.TrustedProxy, ",") {
 		if _, n, e := net.ParseCIDR(strings.TrimSpace(part)); e == nil {
 			h.trusted = append(h.trusted, n)
@@ -103,10 +111,19 @@ func NewHTTP(c config.Config, s *sms.Store, m deleter, static fs.FS, l *slog.Log
 	return h.secureHeaders(h.accessLog(mux))
 }
 
-func (h *HTTP) statusSnapshot() sms.Status {
+type statusResponse struct {
+	sms.Status
+	SlackDeliveries []SlackDelivery `json:"slackDeliveries"`
+}
+
+func (h *HTTP) statusSnapshot() statusResponse {
 	status := h.store.Status()
 	status.SlackEnabled = h.cfg.SlackEnabled
-	return status
+	deliveries := []SlackDelivery{}
+	if h.slack != nil {
+		deliveries = h.slack.SlackHistory()
+	}
+	return statusResponse{Status: status, SlackDeliveries: deliveries}
 }
 
 type accessLogWriter struct {
@@ -329,6 +346,9 @@ func normalizePhone(value string) string {
 func modemIndex(message sms.Message) string {
 	if message.Index > 0 {
 		return strconv.Itoa(message.Index)
+	}
+	if message.ModemID != "" {
+		return message.ModemID
 	}
 	return message.ID
 }

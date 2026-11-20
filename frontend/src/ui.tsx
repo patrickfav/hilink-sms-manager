@@ -17,7 +17,7 @@ import {
   Trash2,
   X,
 } from 'lucide-preact'
-import { api, type SMS, type Status } from './api'
+import { api, AuthenticationError, type SMS, type Status } from './api'
 import modemIcon from './modem.svg'
 import slackIcon from './slack.svg'
 
@@ -42,6 +42,28 @@ function timeLabel(raw: string) {
     hourCycle: 'h23',
   }).format(date)
 }
+function relativeTimeLabel(raw: string) {
+  const timestamp = new Date(raw).getTime()
+  if (!Number.isFinite(timestamp)) return 'Unknown date'
+  const seconds = (timestamp - Date.now()) / 1000
+  if (Math.abs(seconds) < 10) return 'just now'
+  const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [
+    ['year', 31536000],
+    ['month', 2592000],
+    ['week', 604800],
+    ['day', 86400],
+    ['hour', 3600],
+    ['minute', 60],
+    ['second', 1],
+  ]
+  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
+  for (const [unit, unitSeconds] of units) {
+    if (Math.abs(seconds) >= unitSeconds || unit === 'second') {
+      return formatter.format(Math.round(seconds / unitSeconds), unit)
+    }
+  }
+  return 'just now'
+}
 function pathMessageId() {
   const match = window.location.pathname.match(/^\/sms\/([^/?#]+)\/?$/)
   if (!match) return null
@@ -58,8 +80,14 @@ function setMessagePath(id: string | null) {
   window.history.replaceState(null, '', url)
 }
 function tellowsURL(number: string) {
-  const normalized = number.replace(/\D/g, '')
-  return normalized ? `https://www.tellows.com/num/${normalized}` : ''
+  const digits = number.replace(/\D/g, '')
+  const normalized = number.trim().startsWith('+') ? `+${digits}` : digits
+  return normalized ? `https://www.tellows.com/num/${encodeURIComponent(normalized)}` : ''
+}
+function phoneURL(number: string) {
+  const digits = number.replace(/\D/g, '')
+  const normalized = number.trim().startsWith('+') ? `+${digits}` : digits
+  return normalized ? `tel:${normalized}` : ''
 }
 function avatarLetter(name: string) {
   return name.trim().slice(0, 1).toUpperCase()
@@ -127,11 +155,14 @@ function ThemeToggle() {
     </button>
   )
 }
-function Login() {
+function Login({ initialError = '' }: { initialError?: string }) {
   const [username, setUser] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
+  const [error, setError] = useState(initialError)
   const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    if (initialError) setError(initialError)
+  }, [initialError])
   async function submit(e: Event) {
     e.preventDefault()
     setBusy(true)
@@ -153,7 +184,7 @@ function Login() {
         <div class="brand-mark">
           <MessageSquare size={21} />
         </div>
-        <p class="eyebrow">PRIVATE INBOX</p>
+        <p class="eyebrow">SMS INBOX</p>
         <h1>Welcome back</h1>
         <p class="muted">Sign in to view messages from your HiLink modem.</p>
         <form onSubmit={submit}>
@@ -197,6 +228,7 @@ function Login() {
 }
 export function App() {
   const [authenticated, setAuth] = useState<boolean | null>(null)
+  const [authError, setAuthError] = useState('')
   const [items, setItems] = useState<SMS[]>([])
   const [status, setStatus] = useState<Status | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
@@ -209,6 +241,7 @@ export function App() {
   const [confirm, setConfirm] = useState(false)
   const [signOutConfirm, setSignOutConfirm] = useState(false)
   const [deviceInfoOpen, setDeviceInfoOpen] = useState(false)
+  const [slackInfoOpen, setSlackInfoOpen] = useState(false)
   const [rebootConfirm, setRebootConfirm] = useState(false)
   const [rebooting, setRebooting] = useState(false)
   const [page, setPage] = useState(0)
@@ -226,6 +259,7 @@ export function App() {
   )
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
   const visibleMessages = filtered.slice(page * pageSize, (page + 1) * pageSize)
+  const slackDeliveries = status?.slackDeliveries ?? []
   const deviceLabel =
     [status?.deviceName, status?.hardwareVersion].filter(Boolean).join(' · ') || 'HiLink modem'
   useEffect(() => {
@@ -237,11 +271,29 @@ export function App() {
   useEffect(() => {
     setPage(0)
   }, [query])
+  function handleAuthenticationError(err: unknown) {
+    if (!(err instanceof AuthenticationError)) return false
+    setAuthError(err.message)
+    setAuth(false)
+    setItems([])
+    setStatus(null)
+    setSelected(null)
+    setSlackInfoOpen(false)
+    setMessagePath(null)
+    setDeepLinkId(null)
+    setError('')
+    return true
+  }
   useEffect(() => {
     api
       .session()
-      .then((s) => setAuth(s.authenticated))
-      .catch(() => setAuth(false))
+      .then((s) => {
+        setAuth(s.authenticated)
+        if (s.authenticated) setAuthError('')
+      })
+      .catch((err) => {
+        if (!handleAuthenticationError(err)) setAuth(false)
+      })
   }, [])
   useEffect(() => {
     const onPathChange = () => setDeepLinkId(pathMessageId())
@@ -262,7 +314,9 @@ export function App() {
         setStatus(data.status)
         setError('')
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'Unable to load messages')
+        if (!handleAuthenticationError(e)) {
+          setError(e instanceof Error ? e.message : 'Unable to load messages')
+        }
       } finally {
         active = false
         setRefreshing(false)
@@ -304,7 +358,9 @@ export function App() {
       setConfirm(false)
       notice('Message deleted')
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to delete message')
+      if (!handleAuthenticationError(e)) {
+        setError(e instanceof Error ? e.message : 'Unable to delete message')
+      }
     } finally {
       setLoading(false)
     }
@@ -333,7 +389,9 @@ export function App() {
         prev.map((item) => (item.id === message.id ? { ...item, read: true } : item)),
       )
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to mark message as read')
+      if (!handleAuthenticationError(e)) {
+        setError(e instanceof Error ? e.message : 'Unable to mark message as read')
+      }
     } finally {
       markingRead.current.delete(message.id)
     }
@@ -347,8 +405,10 @@ export function App() {
     setSignOutConfirm(false)
     await api.logout().catch(() => {})
     setAuth(false)
+    setAuthError('')
     setItems([])
     setSelected(null)
+    setSlackInfoOpen(false)
     setMessagePath(null)
     setDeepLinkId(null)
   }
@@ -365,7 +425,9 @@ export function App() {
       )
       notice('Modem rebooting…')
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unable to reboot modem')
+      if (!handleAuthenticationError(e)) {
+        setError(e instanceof Error ? e.message : 'Unable to reboot modem')
+      }
     } finally {
       setRebooting(false)
     }
@@ -376,7 +438,7 @@ export function App() {
         <span class="spinner" />
       </div>
     )
-  if (!authenticated) return <Login />
+  if (!authenticated) return <Login initialError={authError} />
   return (
     <div class="app-shell">
       <main class="workspace">
@@ -417,18 +479,20 @@ export function App() {
                 <span>Connecting to modem</span>
               </div>
             )}
-            <span
-              class="connection slack-connection"
+            <button
+              type="button"
+              class="connection connection-button slack-connection"
               title={
                 status?.slackEnabled
-                  ? 'Slack notifications enabled'
-                  : 'Slack notifications disabled'
+                  ? 'Show Slack forwarding history'
+                  : 'Slack notifications disabled; show forwarding history'
               }
               aria-label={
                 status?.slackEnabled
-                  ? 'Slack notifications enabled'
-                  : 'Slack notifications disabled'
+                  ? 'Show Slack forwarding history'
+                  : 'Slack notifications disabled; show forwarding history'
               }
+              onClick={() => setSlackInfoOpen(true)}
             >
               <span class={`dot ${status?.slackEnabled ? 'green' : 'gray'}`} />
               <span
@@ -437,7 +501,7 @@ export function App() {
                 aria-hidden="true"
               />
               <span>Slack {status?.slackEnabled ? 'enabled' : 'disabled'}</span>
-            </span>
+            </button>
             <span class="top-divider" />
             <ThemeToggle />
             <button
@@ -573,7 +637,9 @@ export function App() {
                       <span class="row-content">
                         <span class="row-head">
                           <strong>{m.senderName || m.sender || 'Unknown sender'}</strong>
-                          <time>{timeLabel(m.receivedAt)}</time>
+                          <time dateTime={m.receivedAt} title={timeLabel(m.receivedAt)}>
+                            {relativeTimeLabel(m.receivedAt)}
+                          </time>
                         </span>
                         <span class="preview">{linkifyText(m.text)}</span>
                         {code && (
@@ -653,7 +719,15 @@ export function App() {
                 </div>
                 <div class="detail-body">
                   <div class="detail-title-row">
-                    <h2>{current.senderName || current.sender || 'Unknown sender'}</h2>
+                    <h2>
+                      {current.senderName || !phoneURL(current.sender) ? (
+                        current.senderName || current.sender || 'Unknown sender'
+                      ) : (
+                        <a class="sender-title-phone" href={phoneURL(current.sender)}>
+                          {current.sender}
+                        </a>
+                      )}
+                    </h2>
                     {tellowsURL(current.sender) && (
                       <a
                         class="sender-lookup"
@@ -668,7 +742,7 @@ export function App() {
                     )}
                   </div>
                   {current.senderName && (
-                    <a class="sender-number" href={`tel:${current.sender.replace(/[^\d+]/g, '')}`}>
+                    <a class="sender-number" href={phoneURL(current.sender)}>
                       {current.sender}
                     </a>
                   )}
@@ -823,6 +897,50 @@ export function App() {
               </button>
               <button type="button" class="destructive" onClick={() => setRebootConfirm(true)}>
                 Reboot
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      {slackInfoOpen && (
+        <div
+          class="modal-backdrop"
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSlackInfoOpen(false)
+          }}
+        >
+          <section
+            class="dialog slack-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="slack-info-title"
+          >
+            <div class="dialog-icon">
+              <MessageSquare size={19} />
+            </div>
+            <h2 id="slack-info-title">Slack forwarding history</h2>
+            <p>Showing the last 15 successfully forwarded messages.</p>
+            {slackDeliveries.length ? (
+              <ol class="slack-history">
+                {slackDeliveries.map((delivery) => (
+                  <li key={`${delivery.sentAt}-${delivery.sender}-${delivery.receivedAt}`}>
+                    <strong>{delivery.sender || 'Unknown sender'}</strong>
+                    <span>Sent to Slack {timeLabel(delivery.sentAt)}</span>
+                    <span>SMS received {timeLabel(delivery.receivedAt)}</span>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p class="slack-history-empty">
+                {status?.slackEnabled
+                  ? 'No SMS has been forwarded to Slack yet.'
+                  : 'Slack forwarding is disabled.'}
+              </p>
+            )}
+            <div class="dialog-actions">
+              <button type="button" class="secondary" onClick={() => setSlackInfoOpen(false)}>
+                Close
               </button>
             </div>
           </section>

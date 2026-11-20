@@ -6,6 +6,11 @@ export type SMS = {
   receivedAt: string
   read: boolean
 }
+export type SlackDelivery = {
+  sentAt: string
+  sender: string
+  receivedAt: string
+}
 export type Status = {
   connected: boolean
   lastSync: string | null
@@ -22,7 +27,16 @@ export type Status = {
   wanIpAddress?: string
   storageFull?: boolean
   slackEnabled: boolean
+  slackDeliveries?: SlackDelivery[]
 }
+
+export class AuthenticationError extends Error {
+  constructor(message = 'Authentication required.') {
+    super(message)
+    this.name = 'AuthenticationError'
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     credentials: 'same-origin',
@@ -31,7 +45,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   })
   if (!response.ok) {
     const data = await response.json().catch(() => ({}))
-    throw new Error(data.error || `Request failed (${response.status})`)
+    const message = data.error || `Request failed (${response.status})`
+    if (response.status === 401 || message === 'Authentication required.') {
+      throw new AuthenticationError(message)
+    }
+    throw new Error(message)
   }
   if (response.status === 204) return undefined as T
   return response.json()

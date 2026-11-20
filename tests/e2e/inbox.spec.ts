@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 const sms = {
-  id: '42',
+  id: '6e2293394d5dc4e654afae3b517fa3ea',
   sender: '+43 660 1234567',
   text: 'Your verification code is 482913.',
   receivedAt: '2026-11-14T12:00:00Z',
@@ -26,7 +26,7 @@ test('login, inspect an OTP, and delete its SMS', async ({ page, context }) => {
       },
     }),
   )
-  await page.route('**/api/sms/42', (route) => {
+  await page.route(`**/api/sms/${sms.id}`, (route) => {
     if (route.request().method() === 'DELETE') {
       deleted = true
       return route.fulfill({ status: 204, body: '' })

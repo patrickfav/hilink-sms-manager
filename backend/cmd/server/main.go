@@ -118,7 +118,7 @@ func main() {
 		logger.Error("frontend assets unavailable", "error", err)
 		os.Exit(1)
 	}
-	handler := app.NewHTTP(cfg, store, client, static, logger)
+	handler := app.NewHTTP(cfg, store, client, static, logger, forwarder)
 	server := &http.Server{Addr: cfg.ListenAddr, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		<-ctx.Done()

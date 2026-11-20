@@ -50,8 +50,8 @@ func slackPayloadForReceiver(m sms.Message, receiverNumber, publicURL string) sl
 	if len(body) > 0 {
 		blocks = append(blocks, slackObject{"type": "rich_text", "elements": []slackObject{{"type": "rich_text_quote", "elements": body}}})
 	}
-	if publicURL != "" && m.ID != "" {
-		deepLink := strings.TrimRight(publicURL, "/") + "/sms/" + url.PathEscape(m.ID)
+	if publicURL != "" && (m.ID != "" || m.ModemID != "" || m.Index > 0) {
+		deepLink := strings.TrimRight(publicURL, "/") + "/sms/" + url.PathEscape(sms.Normalize(m).ID)
 		blocks = append(blocks, slackObject{"type": "context", "elements": []slackObject{{"type": "mrkdwn", "text": "<" + deepLink + "|Open in HiLink SMS>"}}})
 	}
 	return slackObject{"text": slackNotificationText(sender, m.Text), "blocks": blocks, "unfurl_links": false, "unfurl_media": false}

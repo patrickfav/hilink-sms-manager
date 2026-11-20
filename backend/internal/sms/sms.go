@@ -1,17 +1,21 @@
 package sms
 
 import (
-	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 )
 
 type Message struct {
+	// ID is the stable, opaque identifier exposed by the HTTP API. ModemID and
+	// Index are kept for modem mutations and deliberately never serialized.
 	ID         string    `json:"id"`
-	Index      int       `json:"index,omitempty"`
+	ModemID    string    `json:"-"`
+	Index      int       `json:"-"`
 	Sender     string    `json:"sender"`
 	SenderName string    `json:"senderName,omitempty"`
 	Text       string    `json:"text"`
@@ -36,16 +40,46 @@ type StorageStatus struct {
 	Full       bool
 }
 
+// PublicID returns the first 32 hexadecimal characters of a versioned SHA-512
+// digest used in API paths and Slack deep links. A domain separator prevents
+// this value from being confused with hashes used for another purpose.
+func PublicID(modemID string) string {
+	sum := sha512.Sum512([]byte("hilink-sms-message:v1\x00" + modemID))
+	return hex.EncodeToString(sum[:])[:32]
+}
+
+// Normalize assigns an opaque public ID while retaining the modem identifier
+// needed for operations such as delete and mark-read. Modem responses usually
+// contain an ID or index; the content fallback keeps malformed responses
+// addressable without exposing their raw fields.
+func Normalize(m Message) Message {
+	modemID := m.ModemID
+	if modemID == "" {
+		modemID = m.ID
+	}
+	if modemID == "" && m.Index > 0 {
+		modemID = strconv.Itoa(m.Index)
+	}
+	if modemID == "" {
+		modemID = fmt.Sprintf("content\x00%d\x00%s\x00%s", m.ReceivedAt.Unix(), m.Sender, m.Text)
+	}
+	m.ModemID = modemID
+	m.ID = PublicID(modemID)
+	return m
+}
+
 // Identity deliberately excludes mutable fields such as read status.
 func Identity(m Message) string {
-	if m.ID != "" {
-		return "id:" + m.ID
+	if m.ModemID != "" {
+		return "modem-id:" + m.ModemID
 	}
 	if m.Index > 0 {
 		return fmt.Sprintf("index:%d", m.Index)
 	}
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%d\x00%s\x00%s", m.ID, m.ReceivedAt.Unix(), m.Sender, m.Text)))
-	return hex.EncodeToString(sum[:])
+	if m.ID != "" {
+		return "id:" + m.ID
+	}
+	return PublicID(fmt.Sprintf("%s\x00%d\x00%s\x00%s", m.ID, m.ReceivedAt.Unix(), m.Sender, m.Text))
 }
 
 type Store struct {

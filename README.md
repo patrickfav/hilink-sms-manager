@@ -6,6 +6,13 @@ A self-hosted web inbox for SMS received by a Huawei [HiLink](https://developer.
 
 The app runs in a single container with no database. Using Go, this requires > 15 MB RAM and hardly any CPU. Messages stay on the modem; the app keeps an in-memory copy. It cannot send SMS.
 
+Message URLs and Slack deep links use stable 32-character identifiers derived
+from SHA-512 rather than the modem's raw SMS IDs or indexes. The modem values
+remain in memory only
+so read-state and deletion requests can target the correct message. These
+identifiers are opaque, not encryption; protect the inbox with HTTPS and the
+application login as described below.
+
 ## Run with Docker Compose
 
 You need Docker Compose, a reachable HiLink modem, and its administrator credentials.
@@ -56,6 +63,10 @@ docker compose --env-file .env -f doc/example.compose.yaml up -d
 ```
 
 Only messages arriving after the startup sync are forwarded. Existing messages are not sent to Slack. Delivery is best-effort, with no durable retry queue.
+
+The inbox's Slack status button shows the last 15 successful deliveries kept in
+memory, including when Slack accepted the message, the sender number, and the
+original SMS time. The history is cleared when the application restarts.
 
 ## Configuration
 
