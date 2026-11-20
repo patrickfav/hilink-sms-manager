@@ -6,7 +6,8 @@ A self-hosted web inbox for SMS received by a Huawei [HiLink](https://developer.
 
 The app runs in a single container with no database. Using Go, this requires > 15 MB RAM and hardly any CPU. Messages stay on the modem; the app keeps an in-memory copy. It cannot send SMS.
 
-Message URLs and Slack deep links use the form
+The inbox is thread-based and groups messages by sender. Thread URLs use
+`/sms/<thread-id>`, while direct message links use
 `/sms/<thread-id>/<message-id>`. Both identifiers are stable, synthetic,
 20-character lowercase Base32 values derived from the first 12 bytes of
 SHA-512 rather than the modem's raw SMS IDs, indexes, or sender numbers. The
@@ -48,10 +49,17 @@ The supplied Compose file listens only on loopback. For remote access, put it be
 
 ## Using the inbox
 
-- Select a message to read it and mark it read on the modem. HiLink does not support marking it unread again.
+- Select a thread to open the conversation. Unread messages in that thread are
+  marked read on the modem when the thread is opened; the UI keeps a temporary
+  in-memory dot on messages that were unread when first seen. HiLink does not
+  support marking messages unread again.
 - Search by sender number or message text. Use the copy button for verification codes classified by the backend.
 - Delete a message to **permanently remove it from the modem**, freeing SMS storage.
 - Switch between light and dark themes; your browser remembers the choice.
+
+The UI displays at most 150 threads and 150 messages per thread as a safety
+limit. The thread view is sorted newest first and supports relative timestamps,
+message deep-link highlighting, and hover links for direct message URLs.
 
 The inbox syncs automatically, every 30 seconds by default. If the modem is unreachable, the app keeps the last successful snapshot. Restarting the app clears its cache and signs you out; messages remain on the modem.
 
@@ -67,7 +75,9 @@ Only messages arriving after the startup sync are forwarded. Existing messages a
 
 The inbox's Slack status button shows the last 15 successful deliveries kept in
 memory, including when Slack accepted the message, the sender number, and the
-original SMS time. The history is cleared when the application restarts.
+original SMS time. When `PUBLIC_URL` is configured, Slack messages also include
+an `Open in Inbox` link to the corresponding thread and message. The history
+is cleared when the application restarts.
 
 ## Configuration
 
@@ -86,7 +96,7 @@ All settings use environment variables. The four credentials in the setup exampl
 | `SESSION_TTL` | `12h` | Web login session lifetime |
 | `SLACK_ENABLED` | `false` | Enable Slack forwarding |
 | `SLACK_WEBHOOK_URL` | — | Required when Slack is enabled |
-| `PUBLIC_URL` | - | Base URL for direct Slack links to individual messages |
+| `PUBLIC_URL` | — | Base URL for direct Slack links to individual messages; required for Slack `Open in Inbox` links |
 | `LISTEN_ADDR` | `:8080` | HTTP listen address |
 | `TRUSTED_PROXY` | — | Comma-separated proxy CIDRs allowed to assert HTTPS and forwarded host |
 
@@ -115,7 +125,7 @@ On first run, this creates `.env.dev` from [.env.dev.example](.env.dev.example).
 The mock inbox starts empty. Add a message:
 
 ```sh
-curl -X POST http://127.0.0.1:18080/__mock/messages \
+curl -X POST http://127.0.0.1:18083/__mock/messages \
   -H 'Content-Type: application/json' \
   -d '{"sender":"+1 555 0100","text":"Your verification code is 482913."}'
 ```

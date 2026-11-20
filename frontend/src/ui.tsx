@@ -1036,8 +1036,8 @@ export function App() {
               ) : (
                 <div class="detail-empty">
                   <Radio size={24} />
-                  <p>Select a message to read</p>
-                  <span>Choose a message from your inbox.</span>
+                  <p>Select a thread to view</p>
+                  <span>Choose a conversation from your inbox.</span>
                 </div>
               )}
             </section>
