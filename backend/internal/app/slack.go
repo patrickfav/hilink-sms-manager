@@ -29,7 +29,11 @@ func slackPayloadForReceiver(m sms.Message, receiverNumber, publicURL string) sl
 		sender += " (" + m.SenderName + ")"
 	}
 	body, _, _ := slackBody(m.Text, m.OTPCodes)
-	heading := slackText("SMS from " + sender)
+	headingElements := []slackObject{slackText("SMS from " + sender)}
+	if teaser := slackTeaser(m.Text, m.OTPCodes); teaser != "" {
+		headingElements = append(headingElements, slackText(" · "+teaser))
+	}
+	heading := headingElements[0]
 	heading["style"] = slackObject{"bold": true}
 	received := "unknown time"
 	receivedLine := "Received " + received
@@ -41,7 +45,7 @@ func slackPayloadForReceiver(m sms.Message, receiverNumber, publicURL string) sl
 		receivedLine += " · " + receiverNumber
 	}
 	blocks := []slackObject{
-		{"type": "rich_text", "elements": []slackObject{{"type": "rich_text_section", "elements": []slackObject{heading}}}},
+		{"type": "rich_text", "elements": []slackObject{{"type": "rich_text_section", "elements": headingElements}}},
 		{"type": "context", "elements": []slackObject{{"type": "mrkdwn", "text": receivedLine}}},
 	}
 	if len(body) > 0 {
@@ -50,9 +54,21 @@ func slackPayloadForReceiver(m sms.Message, receiverNumber, publicURL string) sl
 	if publicURL != "" && (m.ID != "" || m.ModemID != "" || m.Index > 0) {
 		m = sms.Normalize(m)
 		deepLink := strings.TrimRight(publicURL, "/") + "/sms/" + url.PathEscape(m.ThreadID) + "/" + url.PathEscape(m.ID)
-		blocks = append(blocks, slackObject{"type": "context", "elements": []slackObject{{"type": "mrkdwn", "text": "<" + deepLink + "|Open in HiLink SMS>"}}})
+		blocks = append(blocks, slackObject{"type": "context", "elements": []slackObject{{"type": "mrkdwn", "text": "<" + deepLink + "|Open in Inbox>"}}})
 	}
 	return slackObject{"text": slackNotificationText(sender, m), "blocks": blocks, "unfurl_links": false, "unfurl_media": false}
+}
+
+func slackTeaser(text string, otpCodes []string) string {
+	if len(otpCodes) > 0 {
+		return "Code: " + otpCodes[0]
+	}
+	excerpt := strings.Join(strings.Fields(text), " ")
+	runes := []rune(excerpt)
+	if len(runes) > 80 {
+		return string(runes[:77]) + "…"
+	}
+	return excerpt
 }
 
 func slackNotificationText(sender string, message sms.Message) string {

@@ -19,8 +19,12 @@ func TestSlackPayloadFormatsSenderCodeAndSafeLinks(t *testing.T) {
 		t.Fatalf("unexpected fallback text: %#v", payload["text"])
 	}
 	blocks := payload["blocks"].([]slackObject)
+	heading := blocks[0]["elements"].([]slackObject)[0]["elements"].([]slackObject)
+	if heading[1]["text"] != " · Code: 482913" {
+		t.Fatalf("unexpected Slack teaser: %#v", heading)
+	}
 	deepLink := blocks[3]["elements"].([]slackObject)[0]["text"]
-	if deepLink != "<https://sms.example.test/sms/"+sms.ThreadID("+43 660 123456")+"/"+sms.PublicID("123")+"|Open in HiLink SMS>" {
+	if deepLink != "<https://sms.example.test/sms/"+sms.ThreadID("+43 660 123456")+"/"+sms.PublicID("123")+"|Open in Inbox>" {
 		t.Fatalf("unexpected message deep link: %q", deepLink)
 	}
 	quote := blocks[2]["elements"].([]slackObject)[0]

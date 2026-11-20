@@ -363,6 +363,7 @@ export function App() {
   const [items, setItems] = useState<SMS[]>([])
   const [status, setStatus] = useState<Status | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
+  const [seenUnreadIds, setSeenUnreadIds] = useState<Set<string>>(() => new Set())
   const [deepLink, setDeepLink] = useState<DeepLink | null>(() => pathMessageRef())
   const markingRead = useRef(new Set<string>())
   const messageRefs = useRef(new Map<string, HTMLElement>())
@@ -403,14 +404,12 @@ export function App() {
           unreadCount: limited.filter((message) => !message.read).length,
         }
       })
-      .sort(
-        (a, b) => {
-          const dateDifference =
-            new Date(b.latest.receivedAt).getTime() - new Date(a.latest.receivedAt).getTime()
-          if (dateDifference !== 0) return dateDifference
-          return a.key.localeCompare(b.key)
-        },
-      )
+      .sort((a, b) => {
+        const dateDifference =
+          new Date(b.latest.receivedAt).getTime() - new Date(a.latest.receivedAt).getTime()
+        if (dateDifference !== 0) return dateDifference
+        return a.key.localeCompare(b.key)
+      })
       .slice(0, maxThreads)
   }, [items])
   const currentThread = current ? threads.find((thread) => thread.key === threadKey(current)) : null
@@ -419,7 +418,9 @@ export function App() {
     const search = query.toLowerCase()
     return threads.filter((thread) =>
       thread.messages.some((message) =>
-        `${message.sender} ${message.senderName || ''} ${message.text}`.toLowerCase().includes(search),
+        `${message.sender} ${message.senderName || ''} ${message.text}`
+          .toLowerCase()
+          .includes(search),
       ),
     )
   }, [threads, query])
@@ -438,6 +439,7 @@ export function App() {
     setItems([])
     setStatus(null)
     setSelected(null)
+    setSeenUnreadIds(new Set())
     setSlackInfoOpen(false)
     setMessagePath(null)
     setDeepLink(null)
@@ -531,13 +533,15 @@ export function App() {
   }, [authenticated, refreshCount, rebooting])
   async function remove() {
     if (!current) return
+    const deletedThreadId = current.threadId || (await syntheticThreadID(current.sender))
     setLoading(true)
     try {
       await api.delete(current.id)
       setItems((prev) => prev.filter((m) => m.id !== current.id))
-      setSelected(null)
-      setMessagePath(null)
-      setDeepLink(null)
+      const threadRef = { threadId: deletedThreadId, messageId: null }
+      setMessagePath(threadRef)
+      setDeepLink(threadRef)
+      setRefreshCount((count) => count + 1)
       setConfirm(false)
       notice('Message deleted')
     } catch (e) {
@@ -560,6 +564,30 @@ export function App() {
       notice('Clipboard access unavailable')
     }
   }
+  async function markThreadRead(thread: MessageThread) {
+    const unreadMessages = thread.messages.filter((message) => !message.read)
+    if (!unreadMessages.length) return
+    for (const unreadMessage of unreadMessages) {
+      if (markingRead.current.has(unreadMessage.id)) continue
+      markingRead.current.add(unreadMessage.id)
+      try {
+        await api.markRead(unreadMessage.id)
+        setItems((prev) =>
+          prev.map((item) => (item.id === unreadMessage.id ? { ...item, read: true } : item)),
+        )
+        setSeenUnreadIds((previous) => {
+          const next = new Set(previous)
+          next.add(unreadMessage.id)
+          return next
+        })
+      } catch (e) {
+        if (handleAuthenticationError(e)) return
+        setError(e instanceof Error ? e.message : 'Unable to mark message as read')
+      } finally {
+        markingRead.current.delete(unreadMessage.id)
+      }
+    }
+  }
   async function selectMessage(message: SMS, updatePath = true) {
     setSelected(message.id)
     if (updatePath) {
@@ -568,20 +596,8 @@ export function App() {
       setMessagePath(ref)
       setDeepLink(ref)
     }
-    if (message.read || markingRead.current.has(message.id)) return
-    markingRead.current.add(message.id)
-    try {
-      await api.markRead(message.id)
-      setItems((prev) =>
-        prev.map((item) => (item.id === message.id ? { ...item, read: true } : item)),
-      )
-    } catch (e) {
-      if (!handleAuthenticationError(e)) {
-        setError(e instanceof Error ? e.message : 'Unable to mark message as read')
-      }
-    } finally {
-      markingRead.current.delete(message.id)
-    }
+    const thread = threads.find((candidate) => candidate.key === threadKey(message))
+    if (thread) void markThreadRead(thread)
   }
   useEffect(() => {
     if (!authenticated || !deepLink) return
@@ -607,6 +623,7 @@ export function App() {
     setAuth(false)
     setAuthError('')
     setItems([])
+    setSeenUnreadIds(new Set())
     setSelected(null)
     setSlackInfoOpen(false)
     setMessagePath(null)
@@ -764,7 +781,7 @@ export function App() {
                   <span
                     class="refresh-progress-fill"
                     key={refreshCycle}
-                      style={refreshing ? undefined : { animationDuration: `${refreshInterval}ms` }}
+                    style={refreshing ? undefined : { animationDuration: `${refreshInterval}ms` }}
                   />
                 </div>
                 <span class="refresh-content">
@@ -840,48 +857,56 @@ export function App() {
                   </div>
                 ) : (
                   filteredThreads.map((thread) => {
-                  const latest = thread.latest
-                  const sender = latest.senderName || latest.sender || 'Unknown sender'
-                  const latestCode = latest.isOtp ? latest.otpCodes[0] || null : null
-                  return (
-                    <div
-                      class={`message-row thread-row ${currentThread?.key === thread.key ? 'selected' : ''} ${thread.unreadCount ? 'unread' : ''}`}
-                      key={thread.key}
-                    >
-                      <button
-                        type="button"
-                        class="thread-row-main"
-                        aria-label={`${sender}, ${thread.messages.length} ${thread.messages.length === 1 ? 'message' : 'messages'}, last message ${relativeTimeLabel(latest.receivedAt)}`}
-                        onClick={() => void selectMessage(latest)}
+                    const latest = thread.latest
+                    const sender = latest.senderName || latest.sender || 'Unknown sender'
+                    const latestCode = latest.isOtp ? latest.otpCodes[0] || null : null
+                    return (
+                      <div
+                        class={`message-row thread-row ${currentThread?.key === thread.key ? 'selected' : ''} ${thread.unreadCount ? 'unread' : ''}`}
+                        key={thread.key}
                       >
-                        <span class="sender-avatar">
-                          {latest.senderName ? avatarLetter(latest.senderName) : <Phone size={16} />}
-                        </span>
-                        <span class="row-content">
-                          <span class="row-head">
-                            <strong>{sender}</strong>
-                            <time dateTime={latest.receivedAt} title={timeLabel(latest.receivedAt)}>
-                              {relativeTimeLabel(latest.receivedAt)}
-                            </time>
+                        <button
+                          type="button"
+                          class="thread-row-main"
+                          aria-label={`${sender}, ${thread.messages.length} ${thread.messages.length === 1 ? 'message' : 'messages'}, last message ${relativeTimeLabel(latest.receivedAt)}`}
+                          onClick={() => void selectMessage(latest)}
+                        >
+                          <span class="sender-avatar">
+                            {latest.senderName ? (
+                              avatarLetter(latest.senderName)
+                            ) : (
+                              <Phone size={16} />
+                            )}
                           </span>
-                          <span class="preview">{latest.text}</span>
-                        </span>
-                      </button>
-                      <div class="thread-row-footer">
-                        {latestCode && (
-                          <VerificationCodeWidget
-                            code={latestCode}
-                            label="Code:"
-                            onCopy={(value) => void copy(value)}
-                          />
-                        )}
-                        <span class="thread-row-meta">
-                          {thread.messages.length} {thread.messages.length === 1 ? 'message' : 'messages'}
-                          {thread.unreadCount > 0 && ` · ${thread.unreadCount} unread`}
-                        </span>
+                          <span class="row-content">
+                            <span class="row-head">
+                              <strong>{sender}</strong>
+                              <time
+                                dateTime={latest.receivedAt}
+                                title={timeLabel(latest.receivedAt)}
+                              >
+                                {relativeTimeLabel(latest.receivedAt)}
+                              </time>
+                            </span>
+                            <span class="preview">{latest.text}</span>
+                          </span>
+                        </button>
+                        <div class="thread-row-footer">
+                          {latestCode && (
+                            <VerificationCodeWidget
+                              code={latestCode}
+                              label="Code:"
+                              onCopy={(value) => void copy(value)}
+                            />
+                          )}
+                          <span class="thread-row-meta">
+                            {thread.messages.length}{' '}
+                            {thread.messages.length === 1 ? 'message' : 'messages'}
+                            {thread.unreadCount > 0 && ` · ${thread.unreadCount} unread`}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  )
+                    )
                   })
                 )}
               </div>
@@ -889,146 +914,164 @@ export function App() {
           </div>
           <div class="thread-scroll-frame">
             <section class="detail-pane thread-pane">
-            {current ? (
-              <>
-                <div class="detail-header">
-                  <button
-                    type="button"
-                    class="icon-button back"
-                    aria-label="Back to inbox"
-                    onClick={() => {
-                      setSelected(null)
-                      setMessagePath(null)
-                      setDeepLink(null)
-                    }}
-                  >
-                    <ChevronLeft size={18} />
-                  </button>
-                  <span class="detail-label">CONVERSATION</span>
-                  {tellowsURL(current.sender) && (
-                    <a
-                      class="sender-lookup"
-                      href={tellowsURL(current.sender)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      title="Check this number on tellows"
+              {current ? (
+                <>
+                  <div class="detail-header">
+                    <button
+                      type="button"
+                      class="icon-button back"
+                      aria-label="Back to inbox"
+                      onClick={() => {
+                        setSelected(null)
+                        setMessagePath(null)
+                        setDeepLink(null)
+                      }}
                     >
-                      <ExternalLink size={14} />
-                      <span>Check number</span>
-                    </a>
-                  )}
-                </div>
-                <div
-                  class={`scroll-shadow-frame thread-body-scroll-frame ${detailScrollShadows.className}`}
-                >
-                  <div ref={detailScrollShadows.ref} class="thread-body-scroll-content">
-                    <div class="detail-body">
-                  <div class="thread-heading">
-                    <div class="detail-identity">
-                      <h2>
-                        {current.senderName || !phoneURL(current.sender) ? (
-                          current.senderName || current.sender || 'Unknown sender'
-                        ) : (
-                          <a class="sender-title-phone" href={phoneURL(current.sender)}>
-                            {current.sender}
-                          </a>
-                        )}
-                      </h2>
-                      {current.senderName && (
-                        <a class="sender-number" href={phoneURL(current.sender)}>
-                          {current.sender}
-                        </a>
-                      )}
-                    </div>
-                    <span class="thread-count">
-                      {currentThread?.messages.length || 0}{' '}
-                      {currentThread?.messages.length === 1 ? 'message' : 'messages'}
-                    </span>
+                      <ChevronLeft size={18} />
+                    </button>
+                    <span class="detail-label">CONVERSATION</span>
+                    {tellowsURL(current.sender) && (
+                      <a
+                        class="sender-lookup"
+                        href={tellowsURL(current.sender)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Check this number on tellows"
+                      >
+                        <ExternalLink size={14} />
+                        <span>Check number</span>
+                      </a>
+                    )}
                   </div>
-                  <div class="thread-messages" aria-label="Messages in this thread">
-                    {threadMessages.map((message, index) => {
-                      const previous = threadMessages[index - 1]
-                      const showDate =
-                        !previous ||
-                        calendarDateKey(previous.receivedAt) !== calendarDateKey(message.receivedAt)
-                      const sender = message.senderName || message.sender || 'Unknown sender'
-                      return (
-                        <div
-                          class={`thread-entry ${showDate ? 'has-date-divider' : ''}`}
-                          key={message.id}
-                        >
-                          {showDate && (
-                            <div class="thread-date-divider">
-                              <time dateTime={message.receivedAt}>
-                                {calendarDateLabel(message.receivedAt)}
-                              </time>
-                            </div>
-                          )}
-                          <article
-                            id={`message-${message.id}`}
-                            ref={(element) => {
-                              if (element) messageRefs.current.set(message.id, element)
-                              else messageRefs.current.delete(message.id)
-                            }}
-                            class="thread-message"
-                          >
-                            <div class="thread-message-meta">
-                              <button
-                                type="button"
-                                class="thread-message-select"
-                                aria-pressed={message.id === current.id}
-                                aria-label={`Select message from ${sender}, ${timeLabel(message.receivedAt)}`}
-                                onClick={() => void selectMessage(message)}
-                              >
-                                <time dateTime={message.receivedAt} title={timeLabel(message.receivedAt)}>
-                                  {relativeTimeLabel(message.receivedAt)}
-                                </time>
-                              </button>
-                              <span class="thread-char-count">
-                                {message.text.length} {message.text.length === 1 ? 'character' : 'characters'}
-                              </span>
-                              <button
-                                type="button"
-                                class="thread-message-delete"
-                                aria-label={`Delete message from ${sender}, ${timeLabel(message.receivedAt)}`}
-                                onClick={() => {
-                                  setSelected(message.id)
-                                  setConfirm(true)
-                                }}
-                              >
-                                <Trash2 size={12} aria-hidden="true" />
-                              </button>
-                            </div>
-                            <div class="thread-message-text">
-                              {linkifyText(message.text, message.isOtp ? message.otpCodes : [])}
-                            </div>
-                            {message.isOtp && message.otpCodes.length > 0 && (
-                              <div class="thread-message-codes" aria-label="Verification codes">
-                                {message.otpCodes.map((code) => (
-                                  <VerificationCodeWidget
-                                    key={code}
-                                    code={code}
-                                    onCopy={(value) => void copy(value)}
-                                  />
-                                ))}
-                              </div>
+                  <div
+                    class={`scroll-shadow-frame thread-body-scroll-frame ${detailScrollShadows.className}`}
+                  >
+                    <div ref={detailScrollShadows.ref} class="thread-body-scroll-content">
+                      <div class="detail-body">
+                        <div class="thread-heading">
+                          <div class="detail-identity">
+                            <h2>
+                              {current.senderName || !phoneURL(current.sender) ? (
+                                current.senderName || current.sender || 'Unknown sender'
+                              ) : (
+                                <a class="sender-title-phone" href={phoneURL(current.sender)}>
+                                  {current.sender}
+                                </a>
+                              )}
+                            </h2>
+                            {current.senderName && (
+                              <a class="sender-number" href={phoneURL(current.sender)}>
+                                {current.sender}
+                              </a>
                             )}
-                          </article>
+                          </div>
+                          <span class="thread-count">
+                            {currentThread?.messages.length || 0}{' '}
+                            {currentThread?.messages.length === 1 ? 'message' : 'messages'}
+                          </span>
                         </div>
-                      )
-                    })}
-                  </div>
+                        <div class="thread-messages" aria-label="Messages in this thread">
+                          {threadMessages.map((message, index) => {
+                            const previous = threadMessages[index - 1]
+                            const showDate =
+                              !previous ||
+                              calendarDateKey(previous.receivedAt) !==
+                                calendarDateKey(message.receivedAt)
+                            const sender = message.senderName || message.sender || 'Unknown sender'
+                            return (
+                              <div
+                                class={`thread-entry ${showDate ? 'has-date-divider' : ''}`}
+                                key={message.id}
+                              >
+                                {showDate && (
+                                  <div class="thread-date-divider">
+                                    <time dateTime={message.receivedAt}>
+                                      {calendarDateLabel(message.receivedAt)}
+                                    </time>
+                                  </div>
+                                )}
+                                <article
+                                  id={`message-${message.id}`}
+                                  ref={(element) => {
+                                    if (element) messageRefs.current.set(message.id, element)
+                                    else messageRefs.current.delete(message.id)
+                                  }}
+                                  class="thread-message"
+                                >
+                                  <div class="thread-message-meta">
+                                    <button
+                                      type="button"
+                                      class="thread-message-select"
+                                      aria-pressed={message.id === current.id}
+                                      aria-label={`Select message from ${sender}, ${timeLabel(message.receivedAt)}`}
+                                      onClick={() => void selectMessage(message)}
+                                    >
+                                      {seenUnreadIds.has(message.id) && (
+                                        <span
+                                          class="unread-marker"
+                                          title="Unread when this thread was opened"
+                                          aria-hidden="true"
+                                        />
+                                      )}
+                                      <time
+                                        dateTime={message.receivedAt}
+                                        title={timeLabel(message.receivedAt)}
+                                      >
+                                        {relativeTimeLabel(message.receivedAt)}
+                                      </time>
+                                    </button>
+                                    <span class="thread-char-count">
+                                      {message.text.length}{' '}
+                                      {message.text.length === 1 ? 'character' : 'characters'}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      class="thread-message-delete"
+                                      aria-label={`Delete message from ${sender}, ${timeLabel(message.receivedAt)}`}
+                                      onClick={() => {
+                                        setSelected(message.id)
+                                        setConfirm(true)
+                                      }}
+                                    >
+                                      <Trash2 size={12} aria-hidden="true" />
+                                    </button>
+                                  </div>
+                                  <div class="thread-message-text">
+                                    {linkifyText(
+                                      message.text,
+                                      message.isOtp ? message.otpCodes : [],
+                                    )}
+                                  </div>
+                                  {message.isOtp && message.otpCodes.length > 0 && (
+                                    <div
+                                      class="thread-message-codes"
+                                      aria-label="Verification codes"
+                                    >
+                                      {message.otpCodes.map((code) => (
+                                        <VerificationCodeWidget
+                                          key={code}
+                                          code={code}
+                                          onCopy={(value) => void copy(value)}
+                                        />
+                                      ))}
+                                    </div>
+                                  )}
+                                </article>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
                     </div>
                   </div>
+                </>
+              ) : (
+                <div class="detail-empty">
+                  <Radio size={24} />
+                  <p>Select a message to read</p>
+                  <span>Choose a message from your inbox.</span>
                 </div>
-              </>
-            ) : (
-              <div class="detail-empty">
-                <Radio size={24} />
-                <p>Select a message to read</p>
-                <span>Choose a message from your inbox.</span>
-              </div>
-            )}
+              )}
             </section>
           </div>
         </section>
@@ -1239,7 +1282,13 @@ export function App() {
         </div>
       )}
       {rebooting && (
-        <div class="reboot-backdrop" role="alertdialog" aria-modal="true" aria-labelledby="reboot-progress-title" aria-describedby="reboot-progress-description">
+        <div
+          class="reboot-backdrop"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="reboot-progress-title"
+          aria-describedby="reboot-progress-description"
+        >
           <section class="reboot-dialog">
             <div class="dialog-icon">
               <RefreshCw class="refresh-spinning" size={19} />

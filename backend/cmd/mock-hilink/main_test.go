@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"hilink-sms-manager/internal/hilink"
+	"hilink-sms-manager/internal/sms"
 )
 
 func TestMockSupportsClientLoginListInjectionAndDelete(t *testing.T) {
@@ -42,10 +43,10 @@ func TestMockSupportsClientLoginListInjectionAndDelete(t *testing.T) {
 	if err != nil || len(messages) != 1 {
 		t.Fatalf("List() after injection = %v, %v; want one message", messages, err)
 	}
-	if messages[0].ID != "1" || messages[0].Text != "Grüß dich, code 482913" || messages[0].Read {
+	if messages[0].ID != sms.PublicID("1") || messages[0].ModemID != "1" || messages[0].Text != "Grüß dich, code 482913" || messages[0].Read {
 		t.Fatalf("unexpected mocked message: %#v", messages[0])
 	}
-	if err := client.Delete(ctx, messages[0].ID); err != nil {
+	if err := client.Delete(ctx, messages[0].ModemID); err != nil {
 		t.Fatal(err)
 	}
 	messages, err = client.List(ctx)
