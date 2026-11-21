@@ -118,6 +118,7 @@ type statusResponse struct {
 
 func (h *HTTP) statusSnapshot() statusResponse {
 	status := h.store.Status()
+	status.ServerURL = h.cfg.HiLinkURL
 	status.SlackEnabled = h.cfg.SlackEnabled
 	deliveries := []SlackDelivery{}
 	if h.slack != nil {

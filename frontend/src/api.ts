@@ -19,6 +19,7 @@ export type Status = {
   lastSync: string | null
   error?: string
   messageCount: number
+  serverUrl?: string
   phoneNumber?: string
   deviceName?: string
   imei?: string

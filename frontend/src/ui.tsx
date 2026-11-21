@@ -1140,6 +1140,8 @@ export function App() {
             </div>
             <h2 id="device-info-title">Modem information</h2>
             <dl class="device-info-list">
+              <dt>Server URL</dt>
+              <dd>{status.serverUrl || 'Unknown'}</dd>
               <dt>Device name</dt>
               <dd>{status.deviceName || 'Unknown'}</dd>
               <dt>IMEI</dt>

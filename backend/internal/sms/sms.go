@@ -266,6 +266,7 @@ type Status struct {
 	LastSync        *time.Time `json:"lastSync"`
 	Error           string     `json:"error,omitempty"`
 	MessageCount    int        `json:"messageCount"`
+	ServerURL       string     `json:"serverUrl,omitempty"`
 	PhoneNumber     string     `json:"phoneNumber,omitempty"`
 	DeviceName      string     `json:"deviceName,omitempty"`
 	IMEI            string     `json:"imei,omitempty"`
