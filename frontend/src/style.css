@@ -989,6 +989,12 @@ input:focus-visible {
   display: grid;
   gap: 16px;
 }
+.thread-filter-empty {
+  padding: 32px 0;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
 .thread-entry {
   display: grid;
   gap: 28px;
@@ -1127,6 +1133,12 @@ input:focus-visible {
   overflow-wrap: anywhere;
   font-size: 14px;
   line-height: 1.7;
+}
+.thread-message-text mark {
+  padding: 0 0.12em;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--unread-accent) 34%, transparent);
+  color: inherit;
 }
 .thread-message-codes {
   display: flex;

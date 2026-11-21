@@ -61,7 +61,27 @@ function avatarLetter(name: string) {
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
-function linkifyText(text: string, codes: string[] = []): ComponentChildren {
+function highlightText(text: string, query: string, keyPrefix: string): ComponentChildren {
+  const search = query.trim()
+  if (!search) return text
+  const pattern = new RegExp(escapeRegExp(search), 'gi')
+  const parts: ComponentChildren[] = []
+  let cursor = 0
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(text))) {
+    if (match.index > cursor) parts.push(text.slice(cursor, match.index))
+    parts.push(<mark key={`${keyPrefix}-${match.index}`}>{match[0]}</mark>)
+    cursor = match.index + match[0].length
+  }
+  if (cursor < text.length) parts.push(text.slice(cursor))
+  return parts.length > 0 ? parts : text
+}
+function matchesSearch(message: SMS, search: string) {
+  return `${message.sender} ${message.senderName || ''} ${message.text}`
+    .toLowerCase()
+    .includes(search)
+}
+function linkifyText(text: string, codes: string[] = [], highlight = ''): ComponentChildren {
   const tokenSources = [
     `https?://[^\\s<>"']+`,
     `www\\.[^\\s<>"']+`,
@@ -79,13 +99,15 @@ function linkifyText(text: string, codes: string[] = []): ComponentChildren {
     const visibleToken = trailing ? rawToken.slice(0, -trailing.length) : rawToken
     const isDetectedCode = codes.some((code) => code.toLowerCase() === visibleToken.toLowerCase())
     if (isDetectedCode) {
-      if (match.index > cursor) parts.push(text.slice(cursor, match.index))
+      if (match.index > cursor) {
+        parts.push(highlightText(text.slice(cursor, match.index), highlight, `text-${match.index}`))
+      }
       parts.push(
         <code class="message-code" key={`code-${match.index}`}>
-          {visibleToken}
+          {highlightText(visibleToken, highlight, `code-${match.index}`)}
         </code>,
       )
-      if (trailing) parts.push(trailing)
+      if (trailing) parts.push(highlightText(trailing, highlight, `trailing-${match.index}`))
       cursor = match.index + rawToken.length
       continue
     }
@@ -96,7 +118,9 @@ function linkifyText(text: string, codes: string[] = []): ComponentChildren {
       : isEmail
         ? `mailto:${visibleToken}`
         : `tel:${visibleToken.replace(/[^\d+]/g, '')}`
-    if (match.index > cursor) parts.push(text.slice(cursor, match.index))
+    if (match.index > cursor) {
+      parts.push(highlightText(text.slice(cursor, match.index), highlight, `text-${match.index}`))
+    }
     parts.push(
       <a
         class="message-link"
@@ -105,13 +129,14 @@ function linkifyText(text: string, codes: string[] = []): ComponentChildren {
         title={isWebUrl ? 'Check with Google Safe Browsing' : undefined}
         {...(isWebUrl ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
       >
-        {visibleToken}
+        {highlightText(visibleToken, highlight, `link-${match.index}`)}
       </a>,
     )
-    if (trailing) parts.push(trailing)
+    if (trailing) parts.push(highlightText(trailing, highlight, `trailing-${match.index}`))
     cursor = match.index + rawToken.length
   }
-  if (cursor < text.length) parts.push(text.slice(cursor))
+  if (cursor < text.length)
+    parts.push(highlightText(text.slice(cursor), highlight, `text-${cursor}`))
   return parts
 }
 function VerificationCodeWidget({
@@ -342,15 +367,17 @@ export function App() {
   const filteredThreads = useMemo(() => {
     const search = query.toLowerCase()
     return threads.filter((thread) =>
-      thread.messages.some((message) =>
-        `${message.sender} ${message.senderName || ''} ${message.text}`
-          .toLowerCase()
-          .includes(search),
-      ),
+      thread.messages.some((message) => matchesSearch(message, search)),
     )
   }, [threads, query])
+  const visibleThreadMessages = useMemo(() => {
+    const search = query.toLowerCase()
+    return search
+      ? threadMessages.filter((message) => matchesSearch(message, search))
+      : threadMessages
+  }, [threadMessages, query])
   const listScrollShadows = useScrollShadows(filteredThreads.length)
-  const detailScrollShadows = useScrollShadows(threadMessages.length)
+  const detailScrollShadows = useScrollShadows(visibleThreadMessages.length)
   useEffect(() => {
     const element = selectedThreadRef.current
     if (!element || !selectedThreadKey) {
@@ -959,8 +986,9 @@ export function App() {
                           </div>
                           <div class="thread-count">
                             <span>
-                              {currentThread?.messages.length || 0}{' '}
-                              {currentThread?.messages.length === 1 ? 'message' : 'messages'}
+                              {query
+                                ? `${visibleThreadMessages.length} of ${currentThread?.messages.length || 0} messages`
+                                : `${currentThread?.messages.length || 0} ${currentThread?.messages.length === 1 ? 'message' : 'messages'}`}
                             </span>
                             {currentThread?.messages.length ? (
                               <time
@@ -984,108 +1012,116 @@ export function App() {
                           </div>
                         </div>
                         <div class="thread-messages" aria-label="Messages in this thread">
-                          {threadMessages.map((message, index) => {
-                            const previous = threadMessages[index - 1]
-                            const showDate =
-                              !previous ||
-                              calendarDateKey(previous.receivedAt) !==
-                                calendarDateKey(message.receivedAt)
-                            const sender = message.senderName || message.sender || 'Unknown sender'
-                            return (
-                              <div
-                                class={`thread-entry ${showDate ? 'has-date-divider' : ''}`}
-                                key={message.id}
-                              >
-                                {showDate && (
-                                  <div class="thread-date-divider">
-                                    <time dateTime={message.receivedAt}>
-                                      {calendarDateLabel(message.receivedAt)}
-                                    </time>
-                                  </div>
-                                )}
-                                <article
-                                  id={`message-${message.id}`}
-                                  ref={(element) => {
-                                    if (element) messageRefs.current.set(message.id, element)
-                                    else messageRefs.current.delete(message.id)
-                                  }}
-                                  class={`thread-message ${message.id === selected ? 'selected' : ''}`}
+                          {visibleThreadMessages.length > 0 ? (
+                            visibleThreadMessages.map((message, index) => {
+                              const previous = visibleThreadMessages[index - 1]
+                              const showDate =
+                                !previous ||
+                                calendarDateKey(previous.receivedAt) !==
+                                  calendarDateKey(message.receivedAt)
+                              const sender =
+                                message.senderName || message.sender || 'Unknown sender'
+                              return (
+                                <div
+                                  class={`thread-entry ${showDate ? 'has-date-divider' : ''}`}
+                                  key={message.id}
                                 >
-                                  <div class="thread-message-meta">
-                                    <div class="thread-message-select">
-                                      {seenUnreadIds.has(message.id) && (
-                                        <span
-                                          class="unread-marker"
-                                          title="Unread when this thread was opened"
-                                          aria-hidden="true"
-                                        />
-                                      )}
-                                      <button
-                                        type="button"
-                                        class="thread-message-date"
-                                        aria-pressed={message.id === selected}
-                                        aria-label={`Select message from ${sender}, ${timeLabel(message.receivedAt)}`}
-                                        onClick={() => void selectMessage(message)}
-                                      >
-                                        <time
-                                          dateTime={message.receivedAt}
-                                          title={timeLabel(message.receivedAt)}
-                                        >
-                                          {relativeTimeLabel(message.receivedAt)}
-                                        </time>
-                                      </button>
-                                      {message.threadId && (
-                                        <a
-                                          class="thread-message-link"
-                                          href={`/sms/${encodeURIComponent(message.threadId)}/${encodeURIComponent(message.id)}`}
-                                          aria-label="Open direct link to this message"
-                                          title="Open direct link to this message"
-                                          onClick={(event) => event.stopPropagation()}
-                                        >
-                                          <Link2 size={13} aria-hidden="true" />
-                                        </a>
-                                      )}
-                                    </div>
-                                    <span class="thread-char-count">
-                                      {message.text.length}{' '}
-                                      {message.text.length === 1 ? 'character' : 'characters'}
-                                    </span>
-                                    <button
-                                      type="button"
-                                      class="thread-message-delete"
-                                      aria-label={`Delete message from ${sender}, ${timeLabel(message.receivedAt)}`}
-                                      onClick={() => {
-                                        setSelected(message.id)
-                                        setConfirm(true)
-                                      }}
-                                    >
-                                      <Trash2 size={12} aria-hidden="true" />
-                                    </button>
-                                  </div>
-                                  <div class="thread-message-text">
-                                    {linkifyText(
-                                      message.text,
-                                      message.isOtp ? message.otpCodes : [],
-                                    )}
-                                  </div>
-                                  {message.isOtp && message.otpCodes.length > 0 && (
-                                    <div
-                                      class="thread-message-codes"
-                                      aria-label="Verification codes"
-                                    >
-                                      {message.otpCodes.map((code) => (
-                                        <VerificationCodeWidget
-                                          key={code}
-                                          code={code}
-                                          onCopy={(value) => void copy(value)}
-                                        />
-                                      ))}
+                                  {showDate && (
+                                    <div class="thread-date-divider">
+                                      <time dateTime={message.receivedAt}>
+                                        {calendarDateLabel(message.receivedAt)}
+                                      </time>
                                     </div>
                                   )}
-                                </article>
-                              </div>
-                            )
-                          })}
+                                  <article
+                                    id={`message-${message.id}`}
+                                    ref={(element) => {
+                                      if (element) messageRefs.current.set(message.id, element)
+                                      else messageRefs.current.delete(message.id)
+                                    }}
+                                    class={`thread-message ${message.id === selected ? 'selected' : ''}`}
+                                  >
+                                    <div class="thread-message-meta">
+                                      <div class="thread-message-select">
+                                        {seenUnreadIds.has(message.id) && (
+                                          <span
+                                            class="unread-marker"
+                                            title="Unread when this thread was opened"
+                                            aria-hidden="true"
+                                          />
+                                        )}
+                                        <button
+                                          type="button"
+                                          class="thread-message-date"
+                                          aria-pressed={message.id === selected}
+                                          aria-label={`Select message from ${sender}, ${timeLabel(message.receivedAt)}`}
+                                          onClick={() => void selectMessage(message)}
+                                        >
+                                          <time
+                                            dateTime={message.receivedAt}
+                                            title={timeLabel(message.receivedAt)}
+                                          >
+                                            {relativeTimeLabel(message.receivedAt)}
+                                          </time>
+                                        </button>
+                                        {message.threadId && (
+                                          <a
+                                            class="thread-message-link"
+                                            href={`/sms/${encodeURIComponent(message.threadId)}/${encodeURIComponent(message.id)}`}
+                                            aria-label="Open direct link to this message"
+                                            title="Open direct link to this message"
+                                            onClick={(event) => event.stopPropagation()}
+                                          >
+                                            <Link2 size={13} aria-hidden="true" />
+                                          </a>
+                                        )}
+                                      </div>
+                                      <span class="thread-char-count">
+                                        {message.text.length}{' '}
+                                        {message.text.length === 1 ? 'character' : 'characters'}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        class="thread-message-delete"
+                                        aria-label={`Delete message from ${sender}, ${timeLabel(message.receivedAt)}`}
+                                        onClick={() => {
+                                          setSelected(message.id)
+                                          setConfirm(true)
+                                        }}
+                                      >
+                                        <Trash2 size={12} aria-hidden="true" />
+                                      </button>
+                                    </div>
+                                    <div class="thread-message-text">
+                                      {linkifyText(
+                                        message.text,
+                                        message.isOtp ? message.otpCodes : [],
+                                        query,
+                                      )}
+                                    </div>
+                                    {message.isOtp && message.otpCodes.length > 0 && (
+                                      <div
+                                        class="thread-message-codes"
+                                        aria-label="Verification codes"
+                                      >
+                                        {message.otpCodes.map((code) => (
+                                          <VerificationCodeWidget
+                                            key={code}
+                                            code={code}
+                                            onCopy={(value) => void copy(value)}
+                                          />
+                                        ))}
+                                      </div>
+                                    )}
+                                  </article>
+                                </div>
+                              )
+                            })
+                          ) : (
+                            <div class="thread-filter-empty">
+                              No matching messages in this thread.
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
