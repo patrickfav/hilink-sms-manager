@@ -1,6 +1,7 @@
 import type { ComponentChildren } from 'preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
+  Bell,
   Check,
   ChevronLeft,
   Copy,
@@ -20,7 +21,6 @@ import {
 } from 'lucide-preact'
 import { api, AuthenticationError, type SMS, type Status } from './api'
 import modemIcon from './modem.svg'
-import slackIcon from './slack.svg'
 import {
   calendarDateKey,
   calendarDateLabel,
@@ -59,6 +59,51 @@ function threadKey(message: SMS) {
 function internationalSender(message: SMS) {
   return message.senderDetails?.international || message.sender
 }
+type BrowserNotificationPermission = NotificationPermission | 'unsupported'
+
+function getBrowserNotificationPermission(): BrowserNotificationPermission {
+  return typeof window !== 'undefined' && 'Notification' in window
+    ? window.Notification.permission
+    : 'unsupported'
+}
+
+function notificationMessageKey(message: SMS) {
+  return `${message.id}\0${message.receivedAt}\0${message.sender}\0${message.text}`
+}
+
+function createBrowserNotification(title: string, body: string, tag: string) {
+  if (getBrowserNotificationPermission() !== 'granted') return
+  let notification: Notification
+  try {
+    notification = new window.Notification(title, { body, tag })
+  } catch {
+    return null
+  }
+  return notification
+}
+
+function notifyAboutNewMessage(message: SMS) {
+  const sender = internationalSender(message) || 'Unknown sender'
+  const body = message.text.length > 180 ? `${message.text.slice(0, 177)}…` : message.text
+  const notification = createBrowserNotification(
+    `New SMS from ${sender}`,
+    body || 'New message received.',
+    `sms-${message.id}`,
+  )
+  if (!notification) return
+  notification.onclick = () => {
+    window.focus()
+    if (message.threadId) {
+      const url = new URL(window.location.href)
+      url.pathname = `/sms/${encodeURIComponent(message.threadId)}/${encodeURIComponent(message.id)}`
+      url.hash = ''
+      window.history.replaceState(null, '', url)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    }
+    notification.close()
+  }
+}
+
 function avatarLetter(name: string) {
   return name.trim().slice(0, 1).toUpperCase()
 }
@@ -339,7 +384,10 @@ export function App() {
   const [signOutConfirm, setSignOutConfirm] = useState(false)
   const [deviceInfoOpen, setDeviceInfoOpen] = useState(false)
   const [senderInfoOpen, setSenderInfoOpen] = useState(false)
-  const [slackInfoOpen, setSlackInfoOpen] = useState(false)
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
+  const [browserNotificationPermission, setBrowserNotificationPermission] =
+    useState<BrowserNotificationPermission>(() => getBrowserNotificationPermission())
+  const knownMessageKeys = useRef<Set<string> | null>(null)
   const [rebootConfirm, setRebootConfirm] = useState(false)
   const [rebooting, setRebooting] = useState(false)
   const [refreshCount, setRefreshCount] = useState(0)
@@ -427,11 +475,25 @@ export function App() {
     }
   }, [selectedThreadKey, filteredThreads.length, query])
   const slackDeliveries = status?.slackDeliveries ?? []
+  const browserNotificationsAvailable = browserNotificationPermission !== 'unsupported'
+  const browserNotificationsAllowed = browserNotificationPermission === 'granted'
+  const browserNotificationsBlocked = browserNotificationPermission === 'denied'
   const deviceLabel =
     [status?.deviceName, status?.hardwareVersion].filter(Boolean).join(' · ') || 'HiLink modem'
   useEffect(() => {
     document.title = unreadCount > 0 ? `HiLink SMS Inbox (${unreadCount})` : 'HiLink SMS Inbox'
   }, [unreadCount])
+  useEffect(() => {
+    const syncBrowserNotificationPermission = () => {
+      setBrowserNotificationPermission(getBrowserNotificationPermission())
+    }
+    window.addEventListener('focus', syncBrowserNotificationPermission)
+    document.addEventListener('visibilitychange', syncBrowserNotificationPermission)
+    return () => {
+      window.removeEventListener('focus', syncBrowserNotificationPermission)
+      document.removeEventListener('visibilitychange', syncBrowserNotificationPermission)
+    }
+  }, [])
   function handleAuthenticationError(err: unknown) {
     if (!(err instanceof AuthenticationError)) return false
     setAuthError(err.message)
@@ -442,13 +504,23 @@ export function App() {
     setSelectedThreadKey(null)
     setSeenUnreadIds(new Set())
     setSenderInfoOpen(false)
-    setSlackInfoOpen(false)
+    setNotificationsOpen(false)
+    knownMessageKeys.current = null
     setMessagePath(null)
     setDeepLink(null)
     setError('')
     return true
   }
   function applyInboxData(data: Awaited<ReturnType<typeof api.inbox>>) {
+    const previousMessageKeys = knownMessageKeys.current
+    if (previousMessageKeys) {
+      for (const message of data.messages) {
+        if (!previousMessageKeys.has(notificationMessageKey(message))) {
+          notifyAboutNewMessage(message)
+        }
+      }
+    }
+    knownMessageKeys.current = new Set(data.messages.map(notificationMessageKey))
     setItems(data.messages)
     setStatus(data.status)
     setSeenUnreadIds((previous) => {
@@ -498,8 +570,8 @@ export function App() {
         setDeviceInfoOpen(false)
         return
       }
-      if (slackInfoOpen) {
-        setSlackInfoOpen(false)
+      if (notificationsOpen) {
+        setNotificationsOpen(false)
         return
       }
       if (!selected && !selectedThreadKey) return
@@ -518,7 +590,7 @@ export function App() {
     signOutConfirm,
     deviceInfoOpen,
     senderInfoOpen,
-    slackInfoOpen,
+    notificationsOpen,
     rebootConfirm,
     rebooting,
     selectedThreadKey,
@@ -528,7 +600,12 @@ export function App() {
     let active = false
     let timer: number | undefined
     const refresh = async () => {
-      if (document.visibilityState !== 'visible' || active) return
+      if (
+        (document.visibilityState !== 'visible' &&
+          getBrowserNotificationPermission() !== 'granted') ||
+        active
+      )
+        return
       active = true
       setRefreshing(true)
       try {
@@ -553,13 +630,16 @@ export function App() {
     }
     const startPolling = () => {
       stopPolling()
-      if (document.visibilityState !== 'visible') return
+      if (
+        document.visibilityState !== 'visible' &&
+        getBrowserNotificationPermission() !== 'granted'
+      )
+        return
       void refresh()
       timer = window.setInterval(() => void refresh(), refreshInterval)
     }
     const visible = () => {
-      if (document.visibilityState === 'visible') startPolling()
-      else stopPolling()
+      startPolling()
     }
     document.addEventListener('visibilitychange', visible)
     startPolling()
@@ -603,6 +683,24 @@ export function App() {
     } catch {
       notice('Clipboard access unavailable')
     }
+  }
+  async function enableBrowserNotifications() {
+    if (!browserNotificationsAvailable) {
+      notice('Browser notifications are not supported')
+      return
+    }
+    const permission = await window.Notification.requestPermission()
+    setBrowserNotificationPermission(permission)
+    if (permission === 'granted') notice('Browser notifications enabled')
+    else if (permission === 'denied') notice('Browser notifications were blocked')
+  }
+  function sendTestBrowserNotification() {
+    const notification = createBrowserNotification(
+      'HiLink SMS Manager',
+      'Browser notifications are working.',
+      'hilink-sms-test',
+    )
+    notice(notification ? 'Test notification sent' : 'Unable to send test notification')
   }
   async function markThreadRead(thread: MessageThread) {
     const unreadMessages = thread.messages.filter((message) => !message.read)
@@ -679,7 +777,8 @@ export function App() {
     setSelected(null)
     setSelectedThreadKey(null)
     setSenderInfoOpen(false)
-    setSlackInfoOpen(false)
+    setNotificationsOpen(false)
+    knownMessageKeys.current = null
     setMessagePath(null)
     setDeepLink(null)
   }
@@ -770,26 +869,18 @@ export function App() {
             )}
             <button
               type="button"
-              class="connection connection-button slack-connection"
-              title={
-                status?.slackEnabled
-                  ? 'Show Slack forwarding history'
-                  : 'Slack notifications disabled; show forwarding history'
-              }
-              aria-label={
-                status?.slackEnabled
-                  ? 'Show Slack forwarding history'
-                  : 'Slack notifications disabled; show forwarding history'
-              }
-              onClick={() => setSlackInfoOpen(true)}
+              class="connection connection-button notifications-connection"
+              title="Show notification settings"
+              aria-label="Show notification settings"
+              onClick={() => setNotificationsOpen(true)}
             >
-              <span class={`dot ${status?.slackEnabled ? 'green' : 'gray'}`} />
               <span
-                class="status-icon slack-icon"
-                style={`--status-icon: url("${slackIcon}")`}
-                aria-hidden="true"
+                class={`dot ${browserNotificationsAllowed || status?.slackEnabled ? 'green' : 'gray'}`}
               />
-              <span>Slack {status?.slackEnabled ? 'enabled' : 'disabled'}</span>
+              <span class="notifications-icon" aria-hidden="true">
+                <Bell size={15} />
+              </span>
+              <span>Notifications</span>
             </button>
             <span class="top-divider" />
             <ThemeToggle />
@@ -1442,44 +1533,103 @@ export function App() {
           </section>
         </div>
       )}
-      {slackInfoOpen && (
+      {notificationsOpen && (
         <div
           class="modal-backdrop"
           role="presentation"
           onClick={(e) => {
-            if (e.target === e.currentTarget) setSlackInfoOpen(false)
+            if (e.target === e.currentTarget) setNotificationsOpen(false)
           }}
         >
           <section
-            class="dialog slack-dialog"
+            class="dialog notifications-dialog"
             role="dialog"
             aria-modal="true"
-            aria-labelledby="slack-info-title"
+            aria-labelledby="notifications-title"
           >
             <div class="dialog-icon">
-              <MessageSquare size={19} />
+              <Bell size={19} />
             </div>
-            <h2 id="slack-info-title">Slack forwarding history</h2>
-            <p>Showing the last 15 successfully forwarded messages.</p>
-            {slackDeliveries.length ? (
-              <ol class="slack-history">
-                {slackDeliveries.map((delivery) => (
-                  <li key={`${delivery.sentAt}-${delivery.sender}-${delivery.receivedAt}`}>
-                    <strong>{delivery.sender || 'Unknown sender'}</strong>
-                    <span>Sent to Slack {timeLabel(delivery.sentAt)}</span>
-                    <span>SMS received {timeLabel(delivery.receivedAt)}</span>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <p class="slack-history-empty">
-                {status?.slackEnabled
-                  ? 'No SMS has been forwarded to Slack yet.'
-                  : 'Slack forwarding is disabled.'}
-              </p>
-            )}
+            <h2 id="notifications-title">Notifications</h2>
+            <section class="notification-section" aria-labelledby="browser-notifications-title">
+              <div class="notification-section-heading">
+                <div>
+                  <h3 id="browser-notifications-title">Browser notifications</h3>
+                  <p>Get an alert when a new SMS is found during a server refresh.</p>
+                </div>
+                <span class={`notification-state ${browserNotificationsAllowed ? 'is-on' : ''}`}>
+                  <span class={`dot ${browserNotificationsAllowed ? 'green' : 'gray'}`} />
+                  {browserNotificationsAllowed
+                    ? 'Allowed'
+                    : browserNotificationsBlocked
+                      ? 'Blocked'
+                      : 'Off'}
+                </span>
+              </div>
+              <div class="notification-actions">
+                <button
+                  type="button"
+                  class="secondary notification-enable"
+                  disabled={
+                    !browserNotificationsAvailable ||
+                    browserNotificationsAllowed ||
+                    browserNotificationsBlocked
+                  }
+                  onClick={() => void enableBrowserNotifications()}
+                >
+                  {browserNotificationsBlocked
+                    ? 'Allow notifications in browser settings'
+                    : browserNotificationsAllowed
+                      ? 'Browser notifications enabled'
+                      : browserNotificationsAvailable
+                        ? 'Enable browser notifications'
+                        : 'Browser notifications unavailable'}
+                </button>
+                <button
+                  type="button"
+                  class="secondary notification-test"
+                  disabled={!browserNotificationsAllowed}
+                  onClick={sendTestBrowserNotification}
+                >
+                  Send test notification
+                </button>
+              </div>
+            </section>
+            <section class="notification-section" aria-labelledby="slack-notifications-title">
+              <div class="notification-section-heading">
+                <div>
+                  <h3 id="slack-notifications-title">Slack</h3>
+                  <p>
+                    {status?.slackEnabled
+                      ? 'Slack forwarding is enabled.'
+                      : 'Slack forwarding is disabled.'}
+                  </p>
+                </div>
+                <span class={`notification-state ${status?.slackEnabled ? 'is-on' : ''}`}>
+                  <span class={`dot ${status?.slackEnabled ? 'green' : 'gray'}`} />
+                  {status?.slackEnabled ? 'Enabled' : 'Disabled'}
+                </span>
+              </div>
+              {slackDeliveries.length ? (
+                <ol class="slack-history">
+                  {slackDeliveries.map((delivery) => (
+                    <li key={`${delivery.sentAt}-${delivery.sender}-${delivery.receivedAt}`}>
+                      <strong>{delivery.sender || 'Unknown sender'}</strong>
+                      <span>Sent to Slack {timeLabel(delivery.sentAt)}</span>
+                      <span>SMS received {timeLabel(delivery.receivedAt)}</span>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <p class="slack-history-empty">
+                  {status?.slackEnabled
+                    ? 'No SMS has been forwarded to Slack yet.'
+                    : 'Slack forwarding is disabled.'}
+                </p>
+              )}
+            </section>
             <div class="dialog-actions">
-              <button type="button" class="secondary" onClick={() => setSlackInfoOpen(false)}>
+              <button type="button" class="secondary" onClick={() => setNotificationsOpen(false)}>
                 Close
               </button>
             </div>

@@ -194,8 +194,15 @@ input:focus-visible {
   -webkit-mask: var(--status-icon) center / contain no-repeat;
   mask: var(--status-icon) center / contain no-repeat;
 }
-.slack-connection {
+.notifications-connection {
   white-space: nowrap;
+}
+.notifications-icon {
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  flex: none;
 }
 .dot {
   width: 7px;
@@ -1569,8 +1576,51 @@ input:focus-visible {
   outline: 3px solid #77a28688;
   outline-offset: 2px;
 }
-.slack-dialog {
-  max-width: 500px;
+.notifications-dialog {
+  max-width: 540px;
+}
+.notification-section {
+  border-top: 1px solid var(--border);
+  margin-top: 18px;
+  padding-top: 16px;
+}
+.notification-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.notification-section-heading h3 {
+  font-family: 'Raleway', ui-sans-serif, sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+.notification-section-heading p {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 0 0 13px;
+}
+.notification-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.notification-state.is-on {
+  color: var(--accent);
+}
+.notification-actions {
+  display: flex;
+  gap: 8px;
+}
+.notification-enable,
+.notification-test {
+  flex: 1 1 0;
+  justify-content: center;
 }
 .slack-history {
   list-style: none;
@@ -1756,12 +1806,12 @@ input:focus-visible {
     font-size: 0;
     gap: 8px;
   }
-  .slack-connection {
+  .notifications-connection {
     display: inline-flex;
     gap: 8px;
     font-size: 10px;
   }
-  .slack-connection > span:last-child {
+  .notifications-connection > span:last-child {
     display: none;
   }
   .connection .dot {
