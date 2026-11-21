@@ -502,17 +502,13 @@ export function App() {
         setSlackInfoOpen(false)
         return
       }
-      if (!selected) return
+      if (!selected && !selectedThreadKey) return
       const target = event.target as HTMLElement | null
       if (target?.matches('input, textarea, select, [contenteditable="true"]')) return
-      if (currentThread) {
-        void selectThread(currentThread)
-      } else {
-        setSelected(null)
-        setSelectedThreadKey(null)
-        setMessagePath(null)
-        setDeepLink(null)
-      }
+      setSelected(null)
+      setSelectedThreadKey(null)
+      setMessagePath(null)
+      setDeepLink(null)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -525,6 +521,7 @@ export function App() {
     slackInfoOpen,
     rebootConfirm,
     rebooting,
+    selectedThreadKey,
   ])
   useEffect(() => {
     if (!authenticated || rebooting) return
@@ -937,7 +934,14 @@ export function App() {
                           </span>
                           <span class="row-content">
                             <span class="row-head">
-                              <strong>{sender}</strong>
+                              <span class="row-sender">
+                                <strong>{sender}</strong>
+                                {latest.senderName && internationalSender(latest) && (
+                                  <span class="row-sender-number">
+                                    {internationalSender(latest)}
+                                  </span>
+                                )}
+                              </span>
                               <time
                                 dateTime={latest.receivedAt}
                                 title={timeLabel(latest.receivedAt)}
