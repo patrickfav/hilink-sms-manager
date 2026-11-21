@@ -929,10 +929,31 @@ export function App() {
                               </>
                             )}
                           </div>
-                          <span class="thread-count">
-                            {currentThread?.messages.length || 0}{' '}
-                            {currentThread?.messages.length === 1 ? 'message' : 'messages'}
-                          </span>
+                          <div class="thread-count">
+                            <span>
+                              {currentThread?.messages.length || 0}{' '}
+                              {currentThread?.messages.length === 1 ? 'message' : 'messages'}
+                            </span>
+                            {currentThread?.messages.length ? (
+                              <time
+                                class="thread-earliest"
+                                dateTime={
+                                  currentThread.messages[currentThread.messages.length - 1]
+                                    .receivedAt
+                                }
+                                title={timeLabel(
+                                  currentThread.messages[currentThread.messages.length - 1]
+                                    .receivedAt,
+                                )}
+                              >
+                                earliest message{' '}
+                                {relativeTimeLabel(
+                                  currentThread.messages[currentThread.messages.length - 1]
+                                    .receivedAt,
+                                )}
+                              </time>
+                            ) : null}
+                          </div>
                         </div>
                         <div class="thread-messages" aria-label="Messages in this thread">
                           {threadMessages.map((message, index) => {
