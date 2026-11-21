@@ -370,6 +370,17 @@ export function App() {
     setError('')
     return true
   }
+  function applyInboxData(data: Awaited<ReturnType<typeof api.inbox>>) {
+    setItems(data.messages)
+    setStatus(data.status)
+    setSeenUnreadIds((previous) => {
+      const next = new Set(previous)
+      for (const message of data.messages) {
+        if (message.read) next.delete(message.id)
+      }
+      return next
+    })
+  }
   useEffect(() => {
     api
       .session()
@@ -424,8 +435,7 @@ export function App() {
       setRefreshing(true)
       try {
         const data = await api.inbox()
-        setItems(data.messages)
-        setStatus(data.status)
+        applyInboxData(data)
         setError('')
       } catch (e) {
         if (!handleAuthenticationError(e)) {
@@ -597,8 +607,7 @@ export function App() {
       for (;;) {
         try {
           const data = await api.inbox()
-          setItems(data.messages)
-          setStatus(data.status)
+          applyInboxData(data)
           setError('')
           break
         } catch (e) {
