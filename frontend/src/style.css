@@ -38,6 +38,7 @@ h3 {
   --accent-hover: #254a32;
   --unread-accent: #b77945;
   --shadow: 0 18px 55px #20362618;
+  --floating-shadow: 0 8px 16px -10px #20362655;
   --selected-glow: #385a4524;
   --scroll-shadow: #20362630;
 }
@@ -96,6 +97,7 @@ input:focus-visible {
   --accent-hover: #bdd5c3;
   --unread-accent: #d7ad76;
   --shadow: 0 18px 55px #0004;
+  --floating-shadow: 0 8px 16px -10px #00000070;
   --selected-glow: #a6c6ae1a;
   --scroll-shadow: #00000035;
 }
@@ -340,7 +342,7 @@ input:focus-visible {
 }
 .refresh {
   position: relative;
-  overflow: hidden;
+  overflow: clip;
   width: 100%;
   gap: 0;
   animation: none;
@@ -1505,10 +1507,13 @@ input:focus-visible {
   }
 }
 @media (min-width: 641px) {
-  html,
-  body {
+  html {
     height: auto;
     overflow: auto;
+  }
+  body {
+    height: auto;
+    overflow: visible;
   }
   .app-shell {
     height: auto;
@@ -1521,18 +1526,35 @@ input:focus-visible {
   .inbox-panel {
     min-height: 515px;
     height: auto;
-    overflow: hidden;
+    overflow: clip;
+  }
+  .thread-row.selected {
+    position: sticky;
+    top: 64px;
+    z-index: 4;
+  }
+  .thread-row.selected.floating {
+    box-shadow:
+      inset 0 1px color-mix(in srgb, var(--accent) 24%, transparent),
+      inset 0 -1px color-mix(in srgb, var(--accent) 24%, transparent),
+      var(--floating-shadow);
   }
   .list-pane {
     min-height: auto;
     overflow: visible;
   }
+  .list-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--surface);
+  }
   .message-scroll-frame {
-    flex: none;
+    flex: 1 1 auto;
     overflow: visible;
   }
   .message-scroll-frame .message-list {
-    height: auto;
+    height: 100%;
     min-height: auto;
     overflow: visible;
   }

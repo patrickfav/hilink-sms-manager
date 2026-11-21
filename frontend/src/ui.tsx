@@ -285,6 +285,8 @@ export function App() {
   const [deepLink, setDeepLink] = useState<DeepLink | null>(() => pathMessageRef())
   const markingRead = useRef(new Set<string>())
   const messageRefs = useRef(new Map<string, HTMLElement>())
+  const selectedThreadRef = useRef<HTMLDivElement | null>(null)
+  const [selectedThreadFloating, setSelectedThreadFloating] = useState(false)
   const [query, setQuery] = useState('')
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
@@ -349,6 +351,31 @@ export function App() {
   }, [threads, query])
   const listScrollShadows = useScrollShadows(filteredThreads.length)
   const detailScrollShadows = useScrollShadows(threadMessages.length)
+  useEffect(() => {
+    const element = selectedThreadRef.current
+    if (!element || !selectedThreadKey) {
+      setSelectedThreadFloating(false)
+      return
+    }
+    const media = window.matchMedia('(min-width: 641px)')
+    const update = () => {
+      if (!media.matches || getComputedStyle(element).position !== 'sticky') {
+        setSelectedThreadFloating(false)
+        return
+      }
+      const style = getComputedStyle(element)
+      const stickyTop = Number.parseFloat(style.top) || 0
+      const rect = element.getBoundingClientRect()
+      setSelectedThreadFloating(rect.top <= stickyTop + 0.5 && rect.bottom > stickyTop)
+    }
+    update()
+    window.addEventListener('scroll', update, { passive: true })
+    window.addEventListener('resize', update)
+    return () => {
+      window.removeEventListener('scroll', update)
+      window.removeEventListener('resize', update)
+    }
+  }, [selectedThreadKey, filteredThreads.length, query])
   const slackDeliveries = status?.slackDeliveries ?? []
   const deviceLabel =
     [status?.deviceName, status?.hardwareVersion].filter(Boolean).join(' · ') || 'HiLink modem'
@@ -816,7 +843,8 @@ export function App() {
                     const latestCode = latest.isOtp ? latest.otpCodes[0] || null : null
                     return (
                       <div
-                        class={`message-row thread-row ${selectedThreadKey === thread.key ? 'selected' : ''} ${thread.unreadCount ? 'unread' : ''}`}
+                        ref={selectedThreadKey === thread.key ? selectedThreadRef : undefined}
+                        class={`message-row thread-row ${selectedThreadKey === thread.key ? 'selected' : ''} ${selectedThreadKey === thread.key && selectedThreadFloating ? 'floating' : ''} ${thread.unreadCount ? 'unread' : ''}`}
                         key={thread.key}
                       >
                         <button
