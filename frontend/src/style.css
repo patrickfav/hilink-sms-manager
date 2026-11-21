@@ -268,6 +268,11 @@ input:focus-visible {
   color: var(--muted);
   margin: 0 0 8px;
 }
+.page-heading .eyebrow {
+  font-family: 'Domine', Georgia, serif;
+  letter-spacing: 0;
+  font-weight: 400;
+}
 .page-heading h1,
 .login-card h1 {
   font-size: 32px;
@@ -868,6 +873,30 @@ input:focus-visible {
 .detail-identity {
   min-width: 0;
 }
+.sender-trigger {
+  align-items: flex-start;
+  padding: 6px 9px;
+  margin: -6px -9px;
+  color: var(--text);
+  text-align: left;
+}
+.sender-trigger-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+.sender-trigger-name {
+  font-family: 'Domine', Georgia, serif;
+  font-size: 26px;
+  line-height: 1.15;
+  letter-spacing: -0.025em;
+}
+.sender-trigger-number {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.15;
+  font-style: italic;
+}
 .detail-title-row {
   display: flex;
   align-items: flex-start;
@@ -1446,6 +1475,68 @@ input:focus-visible {
 }
 .device-dialog {
   max-width: 460px;
+}
+.sender-dialog {
+  max-width: 420px;
+}
+.sender-dialog .dialog-icon {
+  background: color-mix(in srgb, var(--accent) 13%, var(--surface));
+  color: var(--accent);
+}
+.sender-info-list {
+  display: grid;
+  grid-template-columns: minmax(100px, auto) 1fr;
+  gap: 9px 16px;
+  margin: 0 0 23px;
+  font-size: 12px;
+}
+.sender-info-list dt {
+  color: var(--muted);
+}
+.sender-info-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+.sender-info-copy,
+.device-info-copy {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.sender-info-copy .copy-code-link,
+.device-info-copy .copy-code-link {
+  flex: none;
+}
+.phone-format-link {
+  width: 21px;
+  height: 21px;
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--muted);
+  text-decoration: none;
+}
+.sender-info-copy .phone-format-link:hover {
+  color: var(--accent);
+  background: var(--surface);
+  text-decoration: none;
+}
+.sender-info-list a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.sender-info-list a:hover {
+  text-decoration: underline;
+}
+.sender-info-copy .phone-format-link {
+  color: inherit;
+}
+.sender-info-copy .phone-format-link:focus-visible {
+  outline: 3px solid #77a28688;
+  outline-offset: 2px;
 }
 .slack-dialog {
   max-width: 500px;

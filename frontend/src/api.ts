@@ -8,6 +8,18 @@ export type SMS = {
   read: boolean
   isOtp: boolean
   otpCodes: string[]
+  senderDetails?: SenderDetails
+}
+export type SenderDetails = {
+  country?: string
+  countryCallingCode?: number
+  nationalNumber?: string
+  nationalDestinationCode?: string
+  subscriberNumber?: string
+  international?: string
+  national?: string
+  valid: boolean
+  type?: string
 }
 export type SlackDelivery = {
   sentAt: string

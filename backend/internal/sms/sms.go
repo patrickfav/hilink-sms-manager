@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/nyaruka/phonenumbers/v2"
 )
 
 var otpPatterns = []*regexp.Regexp{
@@ -22,17 +24,33 @@ var otpPatterns = []*regexp.Regexp{
 type Message struct {
 	// ID is the stable, opaque identifier exposed by the HTTP API. ModemID and
 	// Index are kept for modem mutations and deliberately never serialized.
-	ID       string `json:"id"`
-	ThreadID string `json:"threadId"`
-	ModemID  string `json:"-"`
-	Index    int    `json:"-"`
-	Sender   string `json:"sender"`
-	SenderName string `json:"senderName,omitempty"`
-	Text       string `json:"text"`
-	ReceivedAt time.Time `json:"receivedAt"`
-	Read       bool      `json:"read"`
-	IsOTP      bool      `json:"isOtp"`
-	OTPCodes   []string  `json:"otpCodes"`
+	ID            string         `json:"id"`
+	ThreadID      string         `json:"threadId"`
+	ModemID       string         `json:"-"`
+	Index         int            `json:"-"`
+	Sender        string         `json:"sender"`
+	SenderName    string         `json:"senderName,omitempty"`
+	Text          string         `json:"text"`
+	ReceivedAt    time.Time      `json:"receivedAt"`
+	Read          bool           `json:"read"`
+	IsOTP         bool           `json:"isOtp"`
+	OTPCodes      []string       `json:"otpCodes"`
+	SenderDetails *SenderDetails `json:"senderDetails,omitempty"`
+}
+
+// SenderDetails contains the parsed components of an international sender
+// number. The metadata is derived from Google's libphonenumber data through
+// the nyaruka Go port and is omitted when the sender is not parseable.
+type SenderDetails struct {
+	Country                 string `json:"country,omitempty"`
+	CountryCallingCode      int    `json:"countryCallingCode,omitempty"`
+	NationalNumber          string `json:"nationalNumber,omitempty"`
+	NationalDestinationCode string `json:"nationalDestinationCode,omitempty"`
+	SubscriberNumber        string `json:"subscriberNumber,omitempty"`
+	International           string `json:"international,omitempty"`
+	National                string `json:"national,omitempty"`
+	Valid                   bool   `json:"valid"`
+	Type                    string `json:"type,omitempty"`
 }
 
 type DeviceInfo struct {
@@ -101,8 +119,78 @@ func Normalize(m Message) Message {
 	}
 	m.ModemID = modemID
 	m.ID = PublicID(modemID)
+	m.Sender, m.SenderDetails = normalizedSender(m.Sender)
 	m.ThreadID = ThreadID(m.Sender)
 	return ClassifyOTP(m)
+}
+
+func normalizedSender(sender string) (string, *SenderDetails) {
+	details := ParseSenderDetails(sender)
+	if details != nil && details.International != "" {
+		return details.International, details
+	}
+	return sender, details
+}
+
+// ParseSenderDetails parses international sender numbers and returns their
+// country, numbering-plan parts, formats, validity, and number type. A blank
+// default region is intentional: modem sender values are expected to include
+// an international country calling code, while guessing a region for a local
+// sender could produce misleading metadata.
+func ParseSenderDetails(sender string) *SenderDetails {
+	number, err := phonenumbers.Parse(strings.TrimSpace(sender), "")
+	if err != nil {
+		return nil
+	}
+	nationalNumber := phonenumbers.GetNationalSignificantNumber(number)
+	nationalDestinationCodeLength := phonenumbers.GetLengthOfNationalDestinationCode(number)
+	if nationalDestinationCodeLength < 0 || nationalDestinationCodeLength > len(nationalNumber) {
+		nationalDestinationCodeLength = 0
+	}
+	country := phonenumbers.GetRegionCodeForNumber(number)
+	if country == "ZZ" || country == "001" {
+		country = ""
+	}
+	return &SenderDetails{
+		Country:                 country,
+		CountryCallingCode:      int(number.GetCountryCode()),
+		NationalNumber:          nationalNumber,
+		NationalDestinationCode: nationalNumber[:nationalDestinationCodeLength],
+		SubscriberNumber:        nationalNumber[nationalDestinationCodeLength:],
+		International:           phonenumbers.Format(number, phonenumbers.INTERNATIONAL),
+		National:                phonenumbers.Format(number, phonenumbers.NATIONAL),
+		Valid:                   phonenumbers.IsValidNumber(number),
+		Type:                    phoneNumberTypeName(phonenumbers.GetNumberType(number)),
+	}
+}
+
+func phoneNumberTypeName(numberType phonenumbers.PhoneNumberType) string {
+	switch numberType {
+	case phonenumbers.FIXED_LINE:
+		return "fixed line"
+	case phonenumbers.MOBILE:
+		return "mobile"
+	case phonenumbers.FIXED_LINE_OR_MOBILE:
+		return "fixed line or mobile"
+	case phonenumbers.TOLL_FREE:
+		return "toll free"
+	case phonenumbers.PREMIUM_RATE:
+		return "premium rate"
+	case phonenumbers.SHARED_COST:
+		return "shared cost"
+	case phonenumbers.VOIP:
+		return "VoIP"
+	case phonenumbers.PERSONAL_NUMBER:
+		return "personal number"
+	case phonenumbers.PAGER:
+		return "pager"
+	case phonenumbers.UAN:
+		return "universal access number"
+	case phonenumbers.VOICEMAIL:
+		return "voicemail"
+	default:
+		return "unknown"
+	}
 }
 
 // ExtractOTPCodes returns each distinct verification code found in message
@@ -188,9 +276,8 @@ func NewStore() *Store { return &Store{} }
 func (s *Store) Replace(messages []Message) {
 	snapshot := append([]Message(nil), messages...)
 	for i := range snapshot {
-		if snapshot[i].ThreadID == "" {
-			snapshot[i].ThreadID = ThreadID(snapshot[i].Sender)
-		}
+		snapshot[i].Sender, snapshot[i].SenderDetails = normalizedSender(snapshot[i].Sender)
+		snapshot[i].ThreadID = ThreadID(snapshot[i].Sender)
 		snapshot[i] = ClassifyOTP(snapshot[i])
 	}
 	sort.Slice(snapshot, func(i, j int) bool { return snapshot[i].ReceivedAt.After(snapshot[j].ReceivedAt) })

@@ -52,11 +52,30 @@ const maxMessagesPerThread = 150
 const maxThreads = 150
 function threadKey(message: SMS) {
   if (message.threadId) return message.threadId
-  const digits = message.sender.replace(/\D/g, '')
+  const sender = message.senderDetails?.international || message.sender
+  const digits = sender.replace(/\D/g, '')
   return digits || message.sender.trim().toLocaleLowerCase()
+}
+function internationalSender(message: SMS) {
+  return message.senderDetails?.international || message.sender
 }
 function avatarLetter(name: string) {
   return name.trim().slice(0, 1).toUpperCase()
+}
+function countryName(country?: string) {
+  if (!country) return 'Unknown'
+  try {
+    return (
+      new Intl.DisplayNames([navigator.language || 'en'], { type: 'region' }).of(country) || country
+    )
+  } catch {
+    return country
+  }
+}
+function phoneTypeLabel(type?: string) {
+  if (!type) return 'Unknown'
+  if (type === 'VoIP') return type
+  return type.charAt(0).toUpperCase() + type.slice(1)
 }
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -77,7 +96,7 @@ function highlightText(text: string, query: string, keyPrefix: string): Componen
   return parts.length > 0 ? parts : text
 }
 function matchesSearch(message: SMS, search: string) {
-  return `${message.sender} ${message.senderName || ''} ${message.text}`
+  return `${internationalSender(message)} ${message.sender} ${message.senderName || ''} ${message.text}`
     .toLowerCase()
     .includes(search)
 }
@@ -319,6 +338,7 @@ export function App() {
   const [confirm, setConfirm] = useState(false)
   const [signOutConfirm, setSignOutConfirm] = useState(false)
   const [deviceInfoOpen, setDeviceInfoOpen] = useState(false)
+  const [senderInfoOpen, setSenderInfoOpen] = useState(false)
   const [slackInfoOpen, setSlackInfoOpen] = useState(false)
   const [rebootConfirm, setRebootConfirm] = useState(false)
   const [rebooting, setRebooting] = useState(false)
@@ -363,6 +383,9 @@ export function App() {
       ? threads.find((thread) => thread.key === threadKey(current)) || null
       : null
   const threadContact = currentThread?.latest || current
+  const senderInternationalNumber =
+    threadContact?.senderDetails?.international || threadContact?.sender || ''
+  const senderCheckNumberURL = tellowsURL(senderInternationalNumber)
   const threadMessages = currentThread?.messages || []
   const filteredThreads = useMemo(() => {
     const search = query.toLowerCase()
@@ -418,6 +441,7 @@ export function App() {
     setSelected(null)
     setSelectedThreadKey(null)
     setSeenUnreadIds(new Set())
+    setSenderInfoOpen(false)
     setSlackInfoOpen(false)
     setMessagePath(null)
     setDeepLink(null)
@@ -453,18 +477,32 @@ export function App() {
   }, [])
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (
-        event.key !== 'Escape' ||
-        !selected ||
-        confirm ||
-        signOutConfirm ||
-        deviceInfoOpen ||
-        slackInfoOpen ||
-        rebootConfirm ||
-        rebooting
-      ) {
+      if (event.key !== 'Escape' || rebooting) return
+      if (rebootConfirm) {
+        setRebootConfirm(false)
         return
       }
+      if (confirm) {
+        setConfirm(false)
+        return
+      }
+      if (signOutConfirm) {
+        setSignOutConfirm(false)
+        return
+      }
+      if (senderInfoOpen) {
+        setSenderInfoOpen(false)
+        return
+      }
+      if (deviceInfoOpen) {
+        setDeviceInfoOpen(false)
+        return
+      }
+      if (slackInfoOpen) {
+        setSlackInfoOpen(false)
+        return
+      }
+      if (!selected) return
       const target = event.target as HTMLElement | null
       if (target?.matches('input, textarea, select, [contenteditable="true"]')) return
       if (currentThread) {
@@ -478,7 +516,16 @@ export function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [selected, confirm, signOutConfirm, deviceInfoOpen, slackInfoOpen, rebootConfirm, rebooting])
+  }, [
+    selected,
+    confirm,
+    signOutConfirm,
+    deviceInfoOpen,
+    senderInfoOpen,
+    slackInfoOpen,
+    rebootConfirm,
+    rebooting,
+  ])
   useEffect(() => {
     if (!authenticated || rebooting) return
     let active = false
@@ -634,6 +681,7 @@ export function App() {
     setSeenUnreadIds(new Set())
     setSelected(null)
     setSelectedThreadKey(null)
+    setSenderInfoOpen(false)
     setSlackInfoOpen(false)
     setMessagePath(null)
     setDeepLink(null)
@@ -694,7 +742,6 @@ export function App() {
             </span>
             <span>
               HiLink SMS<span class="brand-light"> Inbox</span>
-              {status?.phoneNumber && <span class="brand-phone"> · {status.phoneNumber}</span>}
             </span>
           </div>
           <div class="top-actions">
@@ -762,7 +809,7 @@ export function App() {
         </header>
         <div class="page-heading">
           <div class="heading-copy">
-            <p class="eyebrow">THREADS</p>
+            <p class="eyebrow">{status?.phoneNumber || 'THREADS'}</p>
             <div class="heading-title-row">
               <h1>
                 Your inbox <span class="count">{items.length}</span>
@@ -866,7 +913,8 @@ export function App() {
                 ) : (
                   filteredThreads.map((thread) => {
                     const latest = thread.latest
-                    const sender = latest.senderName || latest.sender || 'Unknown sender'
+                    const sender =
+                      latest.senderName || internationalSender(latest) || 'Unknown sender'
                     const latestCode = latest.isOtp ? latest.otpCodes[0] || null : null
                     return (
                       <div
@@ -940,18 +988,6 @@ export function App() {
                       <ChevronLeft size={18} />
                     </button>
                     <span class="detail-label">CONVERSATION</span>
-                    {threadContact && tellowsURL(threadContact.sender) && (
-                      <a
-                        class="sender-lookup"
-                        href={tellowsURL(threadContact.sender)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title="Check this number on tellows"
-                      >
-                        <ExternalLink size={14} />
-                        <span>Check number</span>
-                      </a>
-                    )}
                   </div>
                   <div
                     class={`scroll-shadow-frame thread-body-scroll-frame ${detailScrollShadows.className}`}
@@ -961,27 +997,26 @@ export function App() {
                         <div class="thread-heading">
                           <div class="detail-identity">
                             {threadContact && (
-                              <>
-                                <h2>
-                                  {threadContact.senderName || !phoneURL(threadContact.sender) ? (
-                                    threadContact.senderName ||
-                                    threadContact.sender ||
-                                    'Unknown sender'
-                                  ) : (
-                                    <a
-                                      class="sender-title-phone"
-                                      href={phoneURL(threadContact.sender)}
-                                    >
-                                      {threadContact.sender}
-                                    </a>
+                              <button
+                                type="button"
+                                class="sender-trigger connection-button"
+                                aria-haspopup="dialog"
+                                aria-label={`Show sender details for ${threadContact.senderName || internationalSender(threadContact) || 'Unknown sender'}`}
+                                onClick={() => setSenderInfoOpen(true)}
+                              >
+                                <span class="sender-trigger-copy">
+                                  <span class="sender-trigger-name">
+                                    {threadContact.senderName ||
+                                      threadContact.sender ||
+                                      'Unknown sender'}
+                                  </span>
+                                  {threadContact.senderName && (
+                                    <span class="sender-trigger-number">
+                                      {internationalSender(threadContact)}
+                                    </span>
                                   )}
-                                </h2>
-                                {threadContact.senderName && (
-                                  <a class="sender-number" href={phoneURL(threadContact.sender)}>
-                                    {threadContact.sender}
-                                  </a>
-                                )}
-                              </>
+                                </span>
+                              </button>
                             )}
                           </div>
                           <div class="thread-count">
@@ -1020,7 +1055,9 @@ export function App() {
                                 calendarDateKey(previous.receivedAt) !==
                                   calendarDateKey(message.receivedAt)
                               const sender =
-                                message.senderName || message.sender || 'Unknown sender'
+                                message.senderName ||
+                                internationalSender(message) ||
+                                'Unknown sender'
                               return (
                                 <div
                                   class={`thread-entry ${showDate ? 'has-date-divider' : ''}`}
@@ -1215,6 +1252,127 @@ export function App() {
           </section>
         </div>
       )}
+      {senderInfoOpen && threadContact && (
+        <div
+          class="modal-backdrop"
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSenderInfoOpen(false)
+          }}
+        >
+          <section
+            class="dialog sender-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sender-info-title"
+          >
+            <div class="dialog-icon sender-dialog-icon">
+              <Phone size={19} />
+            </div>
+            <h2 id="sender-info-title">
+              {threadContact.senderName || threadContact.sender || 'Unknown sender'}
+            </h2>
+            <p>Sender details for this conversation.</p>
+            <dl class="sender-info-list">
+              <dt>Country</dt>
+              <dd>
+                {threadContact.senderDetails?.country
+                  ? `${countryName(threadContact.senderDetails.country)} (${threadContact.senderDetails.country})`
+                  : 'Unknown'}
+              </dd>
+              <dt>Number type</dt>
+              <dd>{phoneTypeLabel(threadContact.senderDetails?.type)}</dd>
+              <dt>Calling code</dt>
+              <dd>
+                {threadContact.senderDetails?.countryCallingCode
+                  ? `+${threadContact.senderDetails.countryCallingCode}`
+                  : 'Unknown'}
+              </dd>
+              {threadContact.senderDetails?.nationalDestinationCode && (
+                <>
+                  <dt>National destination code</dt>
+                  <dd>{threadContact.senderDetails.nationalDestinationCode}</dd>
+                </>
+              )}
+              {threadContact.senderName && (
+                <>
+                  <dt>Name</dt>
+                  <dd>{threadContact.senderName}</dd>
+                </>
+              )}
+              <dt>International format</dt>
+              {threadContact.senderDetails?.international ? (
+                <dd class="sender-info-copy">
+                  <span>{threadContact.senderDetails.international}</span>
+                  {phoneURL(internationalSender(threadContact)) && (
+                    <a
+                      class="phone-format-link"
+                      href={phoneURL(internationalSender(threadContact))}
+                      aria-label="Call sender using international format"
+                      title="Call sender"
+                    >
+                      <Phone size={13} aria-hidden="true" />
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    class="copy-code-link"
+                    aria-label="Copy international format"
+                    onClick={() => void copy(threadContact.senderDetails?.international || '')}
+                  >
+                    <Copy size={13} aria-hidden="true" />
+                  </button>
+                </dd>
+              ) : (
+                <dd>Unknown</dd>
+              )}
+              <dt>National format</dt>
+              {threadContact.senderDetails?.national ? (
+                <dd class="sender-info-copy">
+                  <span>{threadContact.senderDetails.national}</span>
+                  {phoneURL(internationalSender(threadContact)) && (
+                    <a
+                      class="phone-format-link"
+                      href={phoneURL(internationalSender(threadContact))}
+                      aria-label="Call sender using national format"
+                      title="Call sender"
+                    >
+                      <Phone size={13} aria-hidden="true" />
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    class="copy-code-link"
+                    aria-label="Copy national format"
+                    onClick={() => void copy(threadContact.senderDetails?.national || '')}
+                  >
+                    <Copy size={13} aria-hidden="true" />
+                  </button>
+                </dd>
+              ) : (
+                <dd>Unknown</dd>
+              )}
+            </dl>
+            <div class="dialog-actions">
+              <button type="button" class="secondary" onClick={() => setSenderInfoOpen(false)}>
+                Close
+              </button>
+              {senderCheckNumberURL && (
+                <a
+                  class="sender-lookup"
+                  href={senderCheckNumberURL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Check this number on tellows"
+                >
+                  <ExternalLink size={14} />
+                  <span>Check number</span>
+                </a>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
       {deviceInfoOpen && status?.connected && (
         <div
           class="modal-backdrop"
@@ -1243,7 +1401,21 @@ export function App() {
               <dt>IMSI</dt>
               <dd>{status.imsi || 'Unknown'}</dd>
               <dt>My number</dt>
-              <dd>{status.phoneNumber || 'Unknown'}</dd>
+              {status.phoneNumber ? (
+                <dd class="device-info-copy">
+                  <span>{status.phoneNumber}</span>
+                  <button
+                    type="button"
+                    class="copy-code-link"
+                    aria-label="Copy my number"
+                    onClick={() => void copy(status.phoneNumber || '')}
+                  >
+                    <Copy size={13} aria-hidden="true" />
+                  </button>
+                </dd>
+              ) : (
+                <dd>Unknown</dd>
+              )}
               <dt>Hardware version</dt>
               <dd>{status.hardwareVersion || 'Unknown'}</dd>
               <dt>Software version</dt>
