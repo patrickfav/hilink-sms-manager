@@ -10,24 +10,24 @@
   font-family:
     'Kumbh Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
     sans-serif;
-  color: #20231f;
-  background: #f8f9f7;
+  color: #1b211c;
+  background: #f3f5f2;
   font-synthesis: none;
   font-optical-sizing: auto;
   text-rendering: optimizeLegibility;
   font-smooth: always;
-  --bg: #f8f9f7;
+  --bg: #f3f5f2;
   --surface: #fff;
-  --muted: #81877f;
-  --text: #20231f;
-  --border: #e8ebe6;
-  --soft: #f4f6f2;
-  --accent: #385a45;
-  --accent-hover: #2d4938;
+  --muted: #5e685f;
+  --text: #1b211c;
+  --border: #d6ded5;
+  --soft: #edf2ed;
+  --accent: #315d40;
+  --accent-hover: #254a32;
   --unread-accent: #b77945;
-  --shadow: 0 18px 55px #2036260d;
-  --selected-glow: #385a4514;
-  --scroll-shadow: #20362622;
+  --shadow: 0 18px 55px #20362618;
+  --selected-glow: #385a4524;
+  --scroll-shadow: #20362630;
 }
 * {
   box-sizing: border-box;
@@ -435,7 +435,7 @@ input:focus-visible {
   box-shadow: var(--shadow);
   display: grid;
   grid-template-columns: minmax(300px, 0.8fr) minmax(380px, 1.2fr);
-  overflow: visible;
+  overflow: hidden;
 }
 .list-pane {
   min-width: 0;
@@ -677,8 +677,8 @@ input:focus-visible {
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: #eaf0ea;
-  color: #56705b;
+  background: #e1e9e1;
+  color: #405a45;
   font-size: 12px;
   font-weight: 700;
   flex: none;
@@ -748,8 +748,8 @@ input:focus-visible {
 .otp-tag {
   font-size: 9px;
   border-radius: 4px;
-  color: #71826e;
-  background: #edf2e9;
+  color: #536b56;
+  background: #e6eee5;
   padding: 3px 5px;
   align-self: flex-start;
   display: inline-flex;
@@ -1062,7 +1062,7 @@ input:focus-visible {
   margin-left: auto;
   color: var(--muted);
   font-size: 11px;
-  opacity: 0.6;
+  opacity: 0.72;
   white-space: nowrap;
 }
 .thread-message.selected {
@@ -1179,11 +1179,17 @@ input:focus-visible {
   text-align: center;
   color: var(--muted);
   font-size: 10px;
-  opacity: 0.72;
+  opacity: 0.84;
 }
 .footer-disclaimer {
   line-height: 1.4;
   max-width: 760px;
+}
+.dark .thread-char-count {
+  opacity: 0.6;
+}
+.dark .footer {
+  opacity: 0.72;
 }
 .footer > span:first-child {
   display: flex;
@@ -1491,7 +1497,7 @@ input:focus-visible {
   .inbox-panel {
     min-height: 515px;
     height: auto;
-    overflow: visible;
+    overflow: hidden;
   }
   .list-pane {
     min-height: auto;
@@ -1619,6 +1625,9 @@ input:focus-visible {
   }
   .refresh-control .refresh {
     width: 36px;
+  }
+  .refresh-content {
+    gap: 0;
   }
   .refresh svg {
     display: block;
